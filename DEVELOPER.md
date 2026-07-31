@@ -75,3 +75,21 @@ the code, rather than evidence about what its author intended.
 
 There is currently no standing suite. When a test is added, async tests need
 `asyncio_mode = auto` in `pytest.ini` or `pyproject.toml`.
+
+## Changing this documentation
+
+The Markdown files at the repository root — this file, `README.md`,
+`IMPLEMENTATION.md`, `SUMMARY.md`, `QUICK_START.md` — are not editable as part of
+feature or bug work. Changing them takes its own targeted merge request that does
+nothing else.
+
+This is the testing policy applied to the rules themselves. An implementer who
+can rewrite the documentation in the same change can make any work look
+compliant, and can move a constraint instead of meeting it. A documentation
+change that travels on its own is reviewable on its own merits.
+
+If a change makes a document wrong, say so and raise it separately — do not
+correct it in passing.
+
+**Bootstrapping exception:** the branch that first introduces these files edits
+them freely. The rule takes effect once they land on the main branch.
