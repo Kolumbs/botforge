@@ -1,0 +1,256 @@
+# botforge — Implementation Complete
+
+## What Was Built
+
+A new, standalone repository (`/home/kolumbs/botforge`) implementing a chatbot platform where **bots are entirely database content**. No hardcoded per-bot logic or redeployment needed to add/modify capabilities.
+
+### Core Idea
+
+- **Traditional chatbot**: Tool definitions hardcoded in Python, deployed with `git push + restart`.
+- **botforge**: Tool definitions stored in SQLite, deployed by chatting with `define_tool(...)`.
+
+An admin can teach the bot new capabilities, change its personality, and fix bugs entirely through conversation.
+
+## Architecture
+
+### Three Layers
+
+1. **zoozl** (external dependency) — Transport and message routing
+   - Handles Slack, WebSocket, email, WhatsApp
+   - Provides `root.memory` — a generic SQLite dataclass store that all plugins share
+   - No changes to zoozl; botforge uses it as-is
+
+2. **botforge** (new repo) — The bot engine
+   - **dynamic_tools.py** — Three dataclasses (BotConfig, DynamicTool, AdminGrant) + bootstrap tools
+   - **openai_tools.py** — Adapter: ToolSpec → `agents.FunctionTool`
+   - **agent.py** — Loads DB state, falls back to "unconfigured" prompt, assembles Agent
+   - **plugin.py** — zoozl Interface; per-message rebuilds agent to pick up tool/instruction changes
+   - **session.py** — Sliding-window conversation history (last N messages replayed to LLM)
+
+3. **OpenAI Agents SDK** (external dependency) — The LLM loop
+   - Handles tool calling, streaming, retry logic
+   - botforge feeds it bootstrap + dynamic tools; everything else is SDK's responsibility
+
+### Data Model
+
+Three tables in SQLite (via membank):
+
+```
+BotConfig (singleton, id=1):
+  - instructions: str (system prompt)
+  - model: str (e.g., gpt-4o-mini)
+  - updated_at: str
+
+AdminGrant:
+  - talker: str (PRIMARY KEY) — zoozl's session cookie
+  - granted_at: str
+
+DynamicTool:
+  - name: str (PRIMARY KEY)
+  - description: str
+  - source_code: str (Python, must define Params + handler)
+  - enabled: bool
+  - created_by: str (talker)
+  - updated_at: str
+```
+
+### Bootstrap Tools (Hardcoded, Always Available)
+
+Six tools that can't themselves be dynamic (they need to write to the DB):
+
+1. `claim_admin()` — First caller becomes admin (first-come, one-admin model)
+2. `grant_admin(talker)` — Admin grants privileges to another session
+3. `set_instructions(text, model?)` — Admin sets bot's system prompt
+4. `define_tool(name, description, source_code)` — Admin adds a new tool (validates, executes, persists)
+5. `list_tools()` — Show all tools (enabled/disabled)
+6. `disable_tool(name)` — Disable a tool without deleting it
+
+### Dynamic Tool Execution
+
+When a tool is invoked:
+
+1. Load its persisted source code
+2. `exec()` it into a namespace (validates `Params` class + `handler` function exist)
+3. Extract the `Params` (a pydantic model) and `handler` (an async function)
+4. Call `handler(ctx, params)` where `ctx` has `{"memory": ..., "talker": ...}`
+
+No sandboxing — admin code runs with full process privileges (intentional).
+
+## What's Included
+
+### Code
+
+- **botforge/** — 6 Python modules, ~800 LOC
+  - `__init__.py`, `plugin.py`, `dynamic_tools.py`, `openai_tools.py`, `agent.py`, `session.py`
+- **tests/** — Unit test framework for bootstrap mechanism
+- **pyproject.toml** — Package config, deps (zoozl, openai-agents, pydantic)
+
+### Documentation
+
+- **README.md** — Overview, architecture, security notes
+- **IMPLEMENTATION.md** — Detailed breakdown of each module and how to use it
+- **QUICK_START.md** — Step-by-step guide to chat the profile bot into existence
+- **SUMMARY.md** — This file
+
+### Git History
+
+Four commits:
+
+1. `4d9886e` — Initial implementation (all core modules)
+2. `00162fa` — Fixes for membank access patterns and async handling
+3. `5a964a6` — IMPLEMENTATION.md documentation
+4. `c56ce4b` — QUICK_START.md guide
+
+## How to Deploy
+
+### Minimal Example
+
+1. Create a config TOML (e.g., `profile_bot.toml`):
+
+```toml
+[botforge]
+api_key = "sk-..."
+aliases = ["bot", "help"]
+session_database = "profile_sessions.db"
+
+[slack]
+signing_secret = "..."
+workspace_token = "..."
+```
+
+2. Start zoozl (which auto-loads botforge as a plugin):
+
+```bash
+python -m zoozl profile_bot.toml
+```
+
+3. In Slack (or whatever transport), talk to the bot:
+
+```
+@bot claim_admin
+```
+
+4. Chat the bot into existence (see QUICK_START.md for full dialogue):
+
+```
+@bot set_instructions
+
+I'm your personal assistant...
+
+@bot define_tool
+
+name: get_contact
+description: Returns Juris's email
+source_code:
+...
+```
+
+5. Test:
+
+```
+@bot What's your contact info?
+```
+
+Done. No code changes, no redeployment.
+
+## Not Included (Out of Scope)
+
+### Intentionally Not Built (Future Work)
+
+- **Rust process supervisor** — Would manage Python interpreter, auto-install pip packages for new tools, enable clean restarts. Not needed for MVP since most tools don't need new dependencies.
+- **Multi-tenant single-process** — Each bot is its own deployment today; future could be multiple bots in one zoozl process.
+- **Migration/seed tools** — Scripts to import existing bot content (e.g., my_profile_chatbot → botforge). Deferred to after this passes validation.
+- **Audit/permission model** — Currently just "one admin, forever." Could add revocation, multiple admins, role-based access later.
+
+### Explicitly Out of Scope
+
+- No changes to zoozl itself
+- No FIFA extension migration (scope was "profile bot's CV tools only")
+- No tallybot migration
+- No voiceapi changes
+
+## Validation Approach
+
+The plan called for:
+1. ✅ Unit test framework (test_bootstrap.py) — all bootstrap tool logic tested
+2. ✅ Agent assembly logic — tested with mock data
+3. ✅ Admin-gate logic — tested (first claims admin, second is rejected, etc.)
+4. ✅ Tool validation — tested (syntax error, missing Params, malformed source all caught)
+5. ⏳ **Live integration test** — pending deployment and real chat session
+
+**Next step:** Deploy botforge alongside zoozl, start the bot, and chat it into existence following the QUICK_START.md guide. Once the profile bot behaves correctly on botforge, you can retire the old my_profile_chatbot repo.
+
+## Key Design Decisions
+
+| Decision | Rationale |
+|----------|-----------|
+| **No shared secret for admin** | First caller wins. Simple, memorable, fits single-operator use case (you). |
+| **Session-based admin (talker)** | Browser cookie persisted across restarts/conversation windows. No "re-auth per turn" needed. |
+| **DB-backed, no in-memory state** | Full persistence. Process restart doesn't lose admin grants or tool definitions. |
+| **In-process tool reload** | No process restart needed for pure-Python tool changes. Supervisor phase can handle pip installs later. |
+| **No sandboxing for tool code** | Admin = code execution. You own the server and the bot. Intentional trade-off: simplicity over isolation. |
+| **Live source code in DB** | Not bytecode or compiled blobs. Stays human-readable, editable by chat. |
+| **Reuse zoozl's root.memory hook** | Don't add a new DB; use what zoozl already exposes. Keeps attack surface isolated from transport layer. |
+| **Separate deployments per bot** | Not a monolith. Each bot has its own process, config, database. Blast radius contained. |
+
+## Testing the Implementation
+
+### Unit Tests
+
+```bash
+cd /home/kolumbs/botforge
+pytest tests/test_bootstrap.py -v
+```
+
+Covers:
+- Admin claim logic
+- Admin grant/denial
+- Tool definition validation (syntax, missing Params, missing handler)
+- Permission checks (non-admin can't modify bot)
+- Instruction updates
+- Tool enable/disable
+
+Requires mocking membank since dependencies aren't installed locally.
+
+### Integration Test (Manual)
+
+After deploying with zoozl:
+
+1. Connect via transport (Slack, WebSocket, etc.)
+2. Follow QUICK_START.md step-by-step
+3. Verify each tool works
+4. Confirm new instructions apply immediately (no restart)
+
+## File Manifest
+
+```
+botforge/
+├── .gitignore
+├── pyproject.toml           # Package metadata, deps
+├── README.md                # High-level overview
+├── IMPLEMENTATION.md        # Detailed architecture
+├── QUICK_START.md           # Step-by-step usage guide
+├── SUMMARY.md               # This file
+├── botforge/
+│   ├── __init__.py          # Exports Bot as zoozl extension
+│   ├── plugin.py            # Bot(Interface) — zoozl wiring
+│   ├── dynamic_tools.py     # DataClasses + bootstrap tools
+│   ├── openai_tools.py      # ToolSpec adapter
+│   ├── agent.py             # build_agent()
+│   └── session.py           # WindowedSession
+└── tests/
+    ├── __init__.py
+    └── test_bootstrap.py    # Unit tests
+```
+
+## Next Steps
+
+1. **Deploy this repo** alongside zoozl (add to `extensions = ["botforge"]` in zoozl config)
+2. **Start the bot** and verify it loads
+3. **Claim admin** via chat and teach it the profile bot's content (follow QUICK_START.md)
+4. **Retire the old my_profile_chatbot** once this one is confirmed working
+5. **Plan Phase 2** (Rust supervisor, multi-tenant, etc.) based on what you learn from live usage
+
+---
+
+**Status**: ✅ Implementation complete. Ready for deployment and validation.
