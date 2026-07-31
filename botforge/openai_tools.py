@@ -1,22 +1,19 @@
 """Adapter binding framework-neutral ToolSpec descriptors to the OpenAI Agents SDK.
 
-This module is the only place that imports the OpenAI Agents SDK to expose tool
-definitions. The rest of the codebase stays SDK-agnostic; ToolSpec is a pure dataclass.
+This is the only module that converts botforge's tools into SDK objects. The
+descriptors themselves live in ``tools.py`` and know nothing about any SDK, so
+swapping agent frameworks means writing a sibling of this file rather than
+touching the tool layer.
 """
 
 import dataclasses
 
 from agents import FunctionTool, RunContextWrapper
 
+from .tools import ToolSpec
 
-class ToolSpec:
-    """Framework-neutral tool definition (like a blueprint for a function tool)."""
 
-    def __init__(self, name, description, params, handler):
-        self.name = name
-        self.description = description
-        self.params = params  # a pydantic BaseModel class
-        self.handler = handler  # an async callable
+__all__ = ["ToolSpec", "to_function_tools"]
 
 
 def to_function_tools(specs, context):

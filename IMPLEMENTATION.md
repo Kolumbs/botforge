@@ -19,34 +19,36 @@ botforge is a minimal chatbot platform where bot personality and capabilities ar
      - `define_tool(name, description, source_code)`: Admin creates new tools
      - `list_tools()`, `disable_tool(name)`: Tool management
 
-2. **botforge/openai_tools.py** — Adapter from framework-neutral ToolSpec to OpenAI Agents SDK
-   - `ToolSpec` dataclass: name, description, Params pydantic model, handler function
+2. **botforge/tools.py** — `ToolSpec`: the framework-neutral tool descriptor (name, description, Params pydantic model, handler). Imports no LLM SDK, so the tool layer stays independent of the agent framework.
+
+3. **botforge/openai_tools.py** — The only adapter that binds ToolSpecs to the OpenAI Agents SDK
    - `to_function_tools(specs, context)`: Converts ToolSpecs to `agents.FunctionTool` objects
    - Per-call context injection so tools can access `talker` (session identity) without the LLM passing it
+   - Swapping agent frameworks means writing a sibling of this file; nothing else changes
 
-3. **botforge/agent.py** — Agent assembly
+4. **botforge/agent.py** — Agent assembly
    - `build_agent(conf, memory, model?)`: Loads BotConfig and DynamicTool rows, falls back to generic unconfigured prompt if none exist, assembles an Agent with bootstrap + dynamic tools
    - `UNCONFIGURED_PROMPT`: Generic fallback shown on a fresh database, explains how to use `claim_admin`, `define_tool`, `set_instructions`
 
-4. **botforge/plugin.py** — zoozl Interface
+5. **botforge/plugin.py** — zoozl Interface
    - `Bot` class: The zoozl-compatible chatbot plugin
    - `load(root)`: Reads config, stores `root` (for `root.memory`), builds initial agent
    - `consume(package)`: Per message, rebuilds agent (to pick up instruction/tool changes), runs `Runner.run(...)`, sends reply
    - Aliases read from config (`conf["botforge"]["aliases"]`), not hardcoded
 
-5. **botforge/session.py** — Session management
-   - `WindowedSession`: Extends Agents SDK's `SQLiteSession` to only replay the last N conversation items to the LLM (default 10), avoiding prompt bloat while keeping full history persisted
+6. **botforge/session.py** — Conversation history
+   - `WindowedSession`: SDK-free SQLite conversation store that replays only the last N items to the LLM (default 10), avoiding prompt bloat while keeping full history persisted
 
 ## How It Works
 
 ### Persistence Model
 
-All state is persisted via `root.memory`, a `membank.LoadMemory` instance that zoozl creates automatically. It's a SQLite dataclass ORM, so every `@dataclass` in botforge (BotConfig, AdminGrant, DynamicTool) becomes a table:
+Bot configuration is persisted via `root.memory`, a `membank.LoadMemory` instance that zoozl creates automatically. membank is a SQLite dataclass ORM, so every `@dataclass` in botforge (BotConfig, AdminGrant, DynamicTool) becomes a table. Conversation history is shaped like an append-only log rather than a dataclass, so `session.py` manages its own table — in the same SQLite file by default, so there is still only one database per bot:
 
 ```sql
 CREATE TABLE bot_config (id INTEGER PRIMARY KEY, instructions TEXT, model TEXT, updated_at TEXT);
 CREATE TABLE admin_grant (talker TEXT PRIMARY KEY, granted_at TEXT);
-CREATE TABLE dynamic_tool (name TEXT PRIMARY KEY, description TEXT, source_code TEXT, enabled BOOLEAN, created_by TEXT, updated_at TEXT);
+CREATE TABLE dynamic_tool (name TEXT PRIMARY KEY, description TEXT, source_code TEXT, enabled BOOLEAN, created_by TEXT, updated_at TEXT, contract_version INTEGER);
 ```
 
 ### Bootstrap Tools
@@ -77,8 +79,12 @@ async def handler(ctx, params) -> str:
 ```
 
 The engine:
-1. Validates the source (`exec` into a scratch namespace, checks `Params` and `handler` exist)
-2. Persists the source in the `DynamicTool` row
+1. Validates the source against the contract in `TOOL_CONTRACT` — `exec` into a scratch
+   namespace, then check `Params` is a pydantic model and `handler` is an async function
+   taking exactly two positional arguments. `load_tool_source()` is the single place this
+   is enforced, used by both the write path and the load path, so an accepted tool always
+   loads again later.
+2. Persists the source in the `DynamicTool` row, stamped with `CONTRACT_VERSION`
 3. At the next turn, loads and `exec`s all enabled tools into a namespace
 4. Wraps each as a `ToolSpec` and converts to an `agents.FunctionTool`
 5. Merges with bootstrap tools and passes to the Agent
@@ -91,7 +97,7 @@ Create a TOML file (e.g., `my_bot.toml`):
 [botforge]
 api_key = "sk-..."          # Required: OpenAI API key
 aliases = ["bot", "help"]   # Optional: which aliases route to this bot
-session_database = "my_bot_sessions.db"  # Optional: where to persist conversation history
+session_database = "my_bot_sessions.db"  # Optional: defaults to zoozl's own database file
 history_window = 10         # Optional: how many messages to replay per turn
 
 [slack]
@@ -108,7 +114,14 @@ Then run:
 python -m zoozl my_bot.toml
 ```
 
-zoozl will load botforge as a plugin (via `extensions` auto-discovery), create/open the SQLite database, and start the server. Connect via Slack, WebSocket, or email depending on config.
+zoozl imports each module named in `extensions`, discovers the `Interface` subclass in it, creates/opens the SQLite database, and starts the server. Point it at the plugin module, not the package:
+
+```toml
+extensions = ["botforge.plugin"]
+memory_path = "sqlite://my_bot.db"
+```
+
+Connect via Slack, WebSocket, or email depending on config.
 
 ## Deployment
 
@@ -129,6 +142,13 @@ Each bot is its own deployment with its own database file — they don't share a
 
 ## Testing
 
-Run `pytest tests/test_bootstrap.py` to verify the bootstrap mechanism. Tests require a mock membank since the real environment doesn't have all dependencies installed locally.
+```bash
+python -m venv .venv && .venv/bin/pip install -e '.[dev]'
+.venv/bin/python -m pytest
+```
+
+The suite covers admin bootstrap, the tool contract, and conversation history against an
+in-memory stand-in for membank. It needs no API key — the agent-assembly tests patch out
+key configuration.
 
 For integration testing with a real deployment, start the bot, call `claim_admin`, and teach it some tools via conversation.

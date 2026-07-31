@@ -16,6 +16,27 @@ from .session import WindowedSession
 log = logging.getLogger(__name__)
 
 
+def _resolve_session_db(conf, root):
+    """Pick the SQLite file conversation history is written to.
+
+    Defaults to the same file zoozl already opened for ``root.memory``, so
+    history sits beside the BotConfig/DynamicTool/AdminGrant rows instead of in
+    a second database. An explicit ``session_database`` in config wins, and an
+    in-memory zoozl store falls back to a file so history survives a restart.
+    """
+    explicit = conf.get("session_database")
+    if explicit:
+        return explicit
+
+    memory_path = root.conf.get("memory_path", "") or ""
+    if isinstance(memory_path, str) and memory_path.startswith("sqlite://"):
+        path = memory_path[len("sqlite://") :]
+        if path and path != ":memory:":
+            return path
+
+    return "botforge_sessions.db"
+
+
 class Bot(Interface):
     """Generic botforge interface: one agent, configuration and tools from database."""
 
@@ -33,7 +54,7 @@ class Bot(Interface):
 
         self.root = root
         self.conf = conf
-        self.session_db = conf.get("session_database", "botforge_sessions.db")
+        self.session_db = _resolve_session_db(conf, root)
         self.history_window = conf.get("history_window", 10)
         self.aliases = set(conf.get("aliases", ["bot", "help", "greet"]))
 

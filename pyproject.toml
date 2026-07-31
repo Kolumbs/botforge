@@ -6,7 +6,7 @@ build-backend = "setuptools.build_meta"
 name = "botforge"
 version = "0.1.0"
 description = "A chatbot platform where bot personality and tools are entirely database content, authored by chatting"
-authors = [{"name": "Juris Kaminskis", "email": "juris.kaminskis@gmail.com"}]
+authors = [{name = "Juris Kaminskis", email = "juris.kaminskis@gmail.com"}]
 requires-python = ">=3.10"
 
 dependencies = [

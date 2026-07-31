@@ -24,7 +24,7 @@ A chatbot platform where bot personality and capabilities are entirely database 
    signing_secret = "..."
    workspace_token = "..."
    ```
-3. Run: `python -m zoozl my_bot.toml`
+3. Run: `python -m zoozl my_bot.toml` (the config needs `extensions = ["botforge.plugin"]`)
 4. Chat: Say hello to the bot, claim admin, and start teaching it.
 
 ## Project layout

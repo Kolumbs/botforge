@@ -4,11 +4,39 @@ All of these are persisted via root.memory (a membank SQLite dataclass store).
 """
 
 import dataclasses
-from datetime import datetime
+import inspect
+import logging
+from datetime import datetime, timezone
 
 import pydantic
 
-from .openai_tools import ToolSpec
+from .tools import ToolSpec
+
+
+log = logging.getLogger(__name__)
+
+
+# The dynamic-tool contract. Stored tool source lives in the database, so this
+# shape cannot be changed by editing source files - every tool ever authored by
+# chat is written against it. Bump CONTRACT_VERSION if it ever has to change,
+# and migrate or re-author the stored rows.
+CONTRACT_VERSION = 1
+
+TOOL_CONTRACT = """\
+A tool's source code must define exactly two names:
+
+    import pydantic
+
+    class Params(pydantic.BaseModel):
+        ...                          # the tool's arguments
+
+    async def handler(ctx, params) -> str:
+        ...                          # ctx is a dict with "memory" and "talker"
+
+`handler` must be declared with `async def` and take exactly two positional
+arguments. Whatever it returns is handed back to the model as the tool result,
+so return a string.
+"""
 
 
 @dataclasses.dataclass
@@ -35,10 +63,13 @@ class DynamicTool:
 
     name: str = dataclasses.field(default=None, metadata={"key": True})
     description: str = ""
-    source_code: str = ""  # must define class Params and async def handler
+    source_code: str = ""  # written against the contract in TOOL_CONTRACT
     enabled: bool = True
     created_by: str = ""
     updated_at: str = ""
+    # Which contract revision the source was written against, so a tool stored
+    # under an older shape is skipped loudly instead of exec'd blindly.
+    contract_version: int = CONTRACT_VERSION
 
 
 # Bootstrap tool parameter models
@@ -71,13 +102,7 @@ class DefineToolParams(AdminAuthBase):
 
     name: str = pydantic.Field(description="The name of the tool (will be callable as this name).")
     description: str = pydantic.Field(description="A brief description of what the tool does.")
-    source_code: str = pydantic.Field(
-        description=(
-            "Python source code. Must define: "
-            "class Params(pydantic.BaseModel): ... "
-            "async def handler(ctx, params) -> str: ..."
-        )
-    )
+    source_code: str = pydantic.Field(description="Python source code. " + TOOL_CONTRACT)
 
 
 class DisableToolParams(AdminAuthBase):
@@ -88,7 +113,6 @@ class DisableToolParams(AdminAuthBase):
 
 # Helper functions for admin authorization
 
-_admin_talker_cache = {}  # In-memory cache of talker -> bool (is admin)
 
 
 def _is_admin_talker(memory, talker):
@@ -109,11 +133,56 @@ def _grant_admin(memory, talker):
     try:
         grant = memory.get.admin_grant(talker=talker)
         if not grant:
-            now = datetime.utcnow().isoformat()
+            now = datetime.now(timezone.utc).isoformat()
             memory.put(AdminGrant(talker=talker, granted_at=now))
         return True
     except Exception:
         return False
+
+
+def load_tool_source(source_code):
+    """Exec tool source and return ``(Params, handler, error)``.
+
+    This is the only place the contract in TOOL_CONTRACT is enforced. Both the
+    write path (define_tool) and the read path (build_dynamic_tool_specs)
+    go through it, so a tool that was accepted when it was defined can always
+    be loaded again later. ``error`` is a chat-facing string, or None on
+    success.
+    """
+    namespace = {"pydantic": pydantic, "BaseModel": pydantic.BaseModel}
+    try:
+        exec(source_code, namespace)
+    except SyntaxError as e:
+        return None, None, f"Syntax error in source code: {e}"
+    except ImportError as e:
+        return None, None, f"Missing import: {e}. Install the package and try again."
+    except Exception as e:
+        return None, None, f"Error executing source code: {e}"
+
+    params_model = namespace.get("Params")
+    handler = namespace.get("handler")
+
+    if params_model is None:
+        return None, None, "Source code must define a 'Params' pydantic model."
+    if not (isinstance(params_model, type) and issubclass(params_model, pydantic.BaseModel)):
+        return None, None, "'Params' must be a pydantic.BaseModel subclass."
+    if handler is None:
+        return None, None, "Source code must define an async 'handler(ctx, params)' function."
+    if not inspect.iscoroutinefunction(handler):
+        return None, None, "'handler' must be declared with 'async def'."
+
+    positional = [
+        p
+        for p in inspect.signature(handler).parameters.values()
+        if p.kind in (p.POSITIONAL_ONLY, p.POSITIONAL_OR_KEYWORD)
+    ]
+    if len(positional) != 2:
+        return None, None, (
+            "'handler' must take exactly two positional arguments (ctx, params); "
+            f"got {len(positional)}."
+        )
+
+    return params_model, handler, None
 
 
 # Bootstrap tools (always registered, the mechanism that makes everything else possible)
@@ -167,7 +236,7 @@ async def set_instructions(ctx: dict, params: SetInstructionsParams) -> str:
         return "You must be admin to set instructions. Call claim_admin first."
 
     try:
-        now = datetime.utcnow().isoformat()
+        now = datetime.now(timezone.utc).isoformat()
         try:
             config = memory.get.bot_config(id=1)
         except Exception:
@@ -199,33 +268,14 @@ async def define_tool(ctx: dict, params: DefineToolParams) -> str:
     if not _is_admin_talker(memory, talker):
         return "You must be admin to define tools. Call claim_admin first."
 
-    # Validate the source code by exec'ing it into a scratch namespace
-    namespace = {"pydantic": pydantic, "BaseModel": pydantic.BaseModel}
+    # Validate against the contract before persisting anything, so a broken
+    # tool is reported in chat rather than stored and skipped later.
+    _, _, error = load_tool_source(params.source_code)
+    if error:
+        return error
+
     try:
-        exec(params.source_code, namespace)
-    except SyntaxError as e:
-        return f"Syntax error in source code: {e}"
-    except ImportError as e:
-        return f"Missing import: {e}. Install the package and try again."
-    except Exception as e:
-        return f"Error executing source code: {e}"
-
-    # Confirm Params and handler exist
-    if "Params" not in namespace:
-        return "Source code must define a 'Params' pydantic model."
-    if "handler" not in namespace:
-        return "Source code must define an async 'handler(ctx, params) -> str' function."
-
-    Params = namespace["Params"]
-    handler = namespace["handler"]
-
-    # Validate that Params is a pydantic model
-    if not (isinstance(Params, type) and issubclass(Params, pydantic.BaseModel)):
-        return "Params must be a pydantic.BaseModel subclass."
-
-    # Persist the tool
-    try:
-        now = datetime.utcnow().isoformat()
+        now = datetime.now(timezone.utc).isoformat()
         tool = DynamicTool(
             name=params.name,
             description=params.description,
@@ -233,6 +283,7 @@ async def define_tool(ctx: dict, params: DefineToolParams) -> str:
             enabled=True,
             created_by=talker,
             updated_at=now,
+            contract_version=CONTRACT_VERSION,
         )
         memory.put(tool)
         # Bump the tools version so the plugin knows to rebuild the agent
@@ -331,10 +382,12 @@ def _build_bootstrap_tool_specs() -> list[ToolSpec]:
     ]
 
 
-def build_dynamic_function_tools(memory):
-    """Load all enabled DynamicTool rows and convert them to function tools."""
-    from .openai_tools import to_function_tools
+def build_dynamic_tool_specs(memory):
+    """Load enabled DynamicTool rows and return them as ToolSpec descriptors.
 
+    Returns framework-neutral specs; binding them to an agent framework is the
+    caller's job (see ``agent.build_agent``).
+    """
     try:
         # Try to get all DynamicTool rows — membank pattern may vary
         try:
@@ -350,23 +403,30 @@ def build_dynamic_function_tools(memory):
 
     specs = []
     for tool in tools:
-        namespace = {"pydantic": pydantic, "BaseModel": pydantic.BaseModel}
-        try:
-            exec(tool.source_code, namespace)
-            Params = namespace.get("Params")
-            handler = namespace.get("handler")
-            if Params and handler:
-                specs.append(
-                    ToolSpec(
-                        name=tool.name,
-                        description=tool.description,
-                        params=Params,
-                        handler=handler,
-                    )
-                )
-        except Exception:
-            # Skip tools that fail to load
-            pass
+        version = getattr(tool, "contract_version", CONTRACT_VERSION)
+        if version != CONTRACT_VERSION:
+            log.warning(
+                "Skipping tool %r: written against contract version %s, this build speaks %s.",
+                tool.name,
+                version,
+                CONTRACT_VERSION,
+            )
+            continue
 
-    ctx = {"memory": memory, "talker": ""}  # Placeholder context for dynamic tools
-    return to_function_tools(specs, ctx)
+        params_model, handler, error = load_tool_source(tool.source_code)
+        if error:
+            # Stored source that no longer loads - surfaced here rather than
+            # silently vanishing from the agent's tool list.
+            log.warning("Skipping tool %r: %s", tool.name, error)
+            continue
+
+        specs.append(
+            ToolSpec(
+                name=tool.name,
+                description=tool.description,
+                params=params_model,
+                handler=handler,
+            )
+        )
+
+    return specs

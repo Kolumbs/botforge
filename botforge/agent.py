@@ -5,7 +5,7 @@ from agents import Agent, set_default_openai_key
 from .dynamic_tools import (
     BotConfig,
     _build_bootstrap_tool_specs,
-    build_dynamic_function_tools,
+    build_dynamic_tool_specs,
 )
 from .openai_tools import to_function_tools
 
@@ -24,14 +24,14 @@ UNCONFIGURED_PROMPT = (
 def build_agent(conf, memory, model=None):
     """Build an OpenAI Agents SDK Agent, loading config and tools from the database.
 
-    :param conf: the zoozl config dict (for API key, model override).
+    :param conf: the ``[botforge]`` config section (for API key, model override).
     :param memory: a membank.LoadMemory (SQLite dataclass store).
     :param model: optional override for the model. Falls back to conf, then BotConfig, then default.
     :return: an agents.Agent ready to run.
     """
     # Configure the OpenAI API key
     try:
-        api_key = conf["botforge"]["api_key"]
+        api_key = conf["api_key"]
     except KeyError:
         raise RuntimeError("botforge requires an 'api_key' in config [botforge] section") from None
 
@@ -39,7 +39,7 @@ def build_agent(conf, memory, model=None):
 
     # Load the bot's instructions and model from the database
     instructions = UNCONFIGURED_PROMPT
-    actual_model = model or conf.get("botforge", {}).get("model", "gpt-4o-mini")
+    actual_model = model or conf.get("model", "gpt-4o-mini")
 
     try:
         bot_config = memory.get.bot_config(id=1)
@@ -51,21 +51,14 @@ def build_agent(conf, memory, model=None):
     except Exception:
         pass  # Use defaults if BotConfig doesn't exist yet
 
-    # Build the bootstrap tools
-    bootstrap_specs = _build_bootstrap_tool_specs()
-    bootstrap_context = {"memory": memory, "talker": ""}
-    bootstrap_tools = to_function_tools(bootstrap_specs, bootstrap_context)
+    # Bootstrap tools are always present; dynamic tools come from the database.
+    # Both are neutral ToolSpecs, so a single adapter call binds the lot.
+    specs = _build_bootstrap_tool_specs() + build_dynamic_tool_specs(memory)
+    context = {"memory": memory, "talker": ""}  # talker is filled in per call
 
-    # Load dynamic tools from the database
-    dynamic_tools = build_dynamic_function_tools(memory)
-
-    # Combine all tools
-    all_tools = bootstrap_tools + dynamic_tools
-
-    # Create and return the agent
     return Agent(
         name="botforge",
         instructions=instructions,
         model=actual_model,
-        tools=all_tools,
+        tools=to_function_tools(specs, context),
     )

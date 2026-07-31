@@ -21,11 +21,15 @@ An admin can teach the bot new capabilities, change its personality, and fix bug
    - No changes to zoozl; botforge uses it as-is
 
 2. **botforge** (new repo) — The bot engine
-   - **dynamic_tools.py** — Three dataclasses (BotConfig, DynamicTool, AdminGrant) + bootstrap tools
-   - **openai_tools.py** — Adapter: ToolSpec → `agents.FunctionTool`
+   - **tools.py** — `ToolSpec`, the framework-neutral tool descriptor (no SDK import)
+   - **dynamic_tools.py** — Three dataclasses (BotConfig, DynamicTool, AdminGrant) + bootstrap tools + the tool contract (no SDK import)
+   - **session.py** — Sliding-window conversation history over SQLite (no SDK import)
+   - **openai_tools.py** — The one adapter: ToolSpec → `agents.FunctionTool`
    - **agent.py** — Loads DB state, falls back to "unconfigured" prompt, assembles Agent
    - **plugin.py** — zoozl Interface; per-message rebuilds agent to pick up tool/instruction changes
-   - **session.py** — Sliding-window conversation history (last N messages replayed to LLM)
+
+   Only the last three import the agent framework, so swapping it means rewriting one
+   adapter plus two call sites.
 
 3. **OpenAI Agents SDK** (external dependency) — The LLM loop
    - Handles tool calling, streaming, retry logic
@@ -80,8 +84,8 @@ No sandboxing — admin code runs with full process privileges (intentional).
 
 ### Code
 
-- **botforge/** — 6 Python modules, ~800 LOC
-  - `__init__.py`, `plugin.py`, `dynamic_tools.py`, `openai_tools.py`, `agent.py`, `session.py`
+- **botforge/** — 7 Python modules
+  - `__init__.py`, `tools.py`, `dynamic_tools.py`, `session.py`, `openai_tools.py`, `agent.py`, `plugin.py`
 - **tests/** — Unit test framework for bootstrap mechanism
 - **pyproject.toml** — Package config, deps (zoozl, openai-agents, pydantic)
 
@@ -94,12 +98,8 @@ No sandboxing — admin code runs with full process privileges (intentional).
 
 ### Git History
 
-Four commits:
-
-1. `4d9886e` — Initial implementation (all core modules)
-2. `00162fa` — Fixes for membank access patterns and async handling
-3. `5a964a6` — IMPLEMENTATION.md documentation
-4. `c56ce4b` — QUICK_START.md guide
+See `git log` — the platform landed in one commit, followed by a decoupling pass
+that made the tool/session layers framework-independent.
 
 ## How to Deploy
 
@@ -198,8 +198,8 @@ The plan called for:
 ### Unit Tests
 
 ```bash
-cd /home/kolumbs/botforge
-pytest tests/test_bootstrap.py -v
+python -m venv .venv && .venv/bin/pip install -e '.[dev]'
+.venv/bin/python -m pytest
 ```
 
 Covers:
@@ -245,7 +245,7 @@ botforge/
 
 ## Next Steps
 
-1. **Deploy this repo** alongside zoozl (add to `extensions = ["botforge"]` in zoozl config)
+1. **Deploy this repo** alongside zoozl (add `extensions = ["botforge.plugin"]` to the zoozl config)
 2. **Start the bot** and verify it loads
 3. **Claim admin** via chat and teach it the profile bot's content (follow QUICK_START.md)
 4. **Retire the old my_profile_chatbot** once this one is confirmed working
