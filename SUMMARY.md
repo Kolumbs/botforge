@@ -198,7 +198,7 @@ and chat the bot into existence following QUICK_START.md.
 
 Tests are written by a dedicated testing persona/agent, never by the agent that
 wrote the feature or fixed the bug under test, and are read-only to implementers.
-See [CLAUDE.md](CLAUDE.md) for the full policy.
+See the testing policy in [README.md](README.md#testing-policy).
 
 ## File Manifest
 
@@ -210,7 +210,6 @@ botforge/
 ├── IMPLEMENTATION.md        # Detailed architecture
 ├── QUICK_START.md           # Step-by-step usage guide
 ├── SUMMARY.md               # This file
-├── CLAUDE.md                # Working agreements (testing policy)
 └── botforge/
     ├── __init__.py          # Empty by design; zoozl loads botforge.plugin
     ├── tools.py             # ToolSpec descriptor        (no SDK)
