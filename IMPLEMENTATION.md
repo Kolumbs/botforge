@@ -142,13 +142,16 @@ Each bot is its own deployment with its own database file — they don't share a
 
 ## Testing
 
+There is no standing test suite. Tests get written when a bug is identified, and
+they target that specific bug — the goal is regression coverage for things that
+actually broke, not scaffolding maintained alongside development.
+
+When you do add one, install the dev extra and note that async tests need
+`asyncio_mode = auto` (a `pytest.ini` with that line, or the equivalent in
+`pyproject.toml`):
+
 ```bash
 python -m venv .venv && .venv/bin/pip install -e '.[dev]'
-.venv/bin/python -m pytest
+.venv/bin/python -m pytest path/to/test_the_bug.py
 ```
 
-The suite covers admin bootstrap, the tool contract, and conversation history against an
-in-memory stand-in for membank. It needs no API key — the agent-assembly tests patch out
-key configuration.
-
-For integration testing with a real deployment, start the bot, call `claim_admin`, and teach it some tools via conversation.

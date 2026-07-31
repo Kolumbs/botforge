@@ -86,7 +86,6 @@ No sandboxing — admin code runs with full process privileges (intentional).
 
 - **botforge/** — 7 Python modules
   - `__init__.py`, `tools.py`, `dynamic_tools.py`, `session.py`, `openai_tools.py`, `agent.py`, `plugin.py`
-- **tests/** — Unit test framework for bootstrap mechanism
 - **pyproject.toml** — Package config, deps (zoozl, openai-agents, pydantic)
 
 ### Documentation
@@ -171,14 +170,16 @@ Done. No code changes, no redeployment.
 
 ## Validation Approach
 
-The plan called for:
-1. ✅ Unit test framework (test_bootstrap.py) — all bootstrap tool logic tested
-2. ✅ Agent assembly logic — tested with mock data
-3. ✅ Admin-gate logic — tested (first claims admin, second is rejected, etc.)
-4. ✅ Tool validation — tested (syntax error, missing Params, malformed source all caught)
-5. ⏳ **Live integration test** — pending deployment and real chat session
+Verified by hand rather than by a standing suite:
 
-**Next step:** Deploy botforge alongside zoozl, start the bot, and chat it into existence following the QUICK_START.md guide. Once the profile bot behaves correctly on botforge, you can retire the old my_profile_chatbot repo.
+- The value layer (`tools`, `dynamic_tools`, `session`) imports with no LLM SDK present.
+- `Bot` is a valid zoozl `Interface`.
+- Admin bootstrap, the tool contract, session windowing and agent assembly were each
+  exercised once during the decoupling pass; the bugs that surfaced are fixed.
+
+**Still unverified:** a live end-to-end run against a real OpenAI key and a zoozl
+config. That is the remaining gap before trusting a deployment — deploy, `claim_admin`,
+and chat the bot into existence following QUICK_START.md.
 
 ## Key Design Decisions
 
@@ -193,33 +194,20 @@ The plan called for:
 | **Reuse zoozl's root.memory hook** | Don't add a new DB; use what zoozl already exposes. Keeps attack surface isolated from transport layer. |
 | **Separate deployments per bot** | Not a monolith. Each bot has its own process, config, database. Blast radius contained. |
 
-## Testing the Implementation
+## Testing
 
-### Unit Tests
+There is no standing test suite. Tests get written when a bug is identified, and
+they target that specific bug — the goal is regression coverage for things that
+actually broke, not scaffolding maintained alongside development.
+
+When you do add one, install the dev extra and note that async tests need
+`asyncio_mode = auto` (a `pytest.ini` with that line, or the equivalent in
+`pyproject.toml`):
 
 ```bash
 python -m venv .venv && .venv/bin/pip install -e '.[dev]'
-.venv/bin/python -m pytest
+.venv/bin/python -m pytest path/to/test_the_bug.py
 ```
-
-Covers:
-- Admin claim logic
-- Admin grant/denial
-- Tool definition validation (syntax, missing Params, missing handler)
-- Permission checks (non-admin can't modify bot)
-- Instruction updates
-- Tool enable/disable
-
-Requires mocking membank since dependencies aren't installed locally.
-
-### Integration Test (Manual)
-
-After deploying with zoozl:
-
-1. Connect via transport (Slack, WebSocket, etc.)
-2. Follow QUICK_START.md step-by-step
-3. Verify each tool works
-4. Confirm new instructions apply immediately (no restart)
 
 ## File Manifest
 
@@ -231,16 +219,14 @@ botforge/
 ├── IMPLEMENTATION.md        # Detailed architecture
 ├── QUICK_START.md           # Step-by-step usage guide
 ├── SUMMARY.md               # This file
-├── botforge/
-│   ├── __init__.py          # Exports Bot as zoozl extension
-│   ├── plugin.py            # Bot(Interface) — zoozl wiring
-│   ├── dynamic_tools.py     # DataClasses + bootstrap tools
-│   ├── openai_tools.py      # ToolSpec adapter
-│   ├── agent.py             # build_agent()
-│   └── session.py           # WindowedSession
-└── tests/
-    ├── __init__.py
-    └── test_bootstrap.py    # Unit tests
+└── botforge/
+    ├── __init__.py          # Empty by design; zoozl loads botforge.plugin
+    ├── tools.py             # ToolSpec descriptor        (no SDK)
+    ├── dynamic_tools.py     # Dataclasses + bootstrap tools + contract  (no SDK)
+    ├── session.py           # WindowedSession            (no SDK)
+    ├── openai_tools.py      # ToolSpec → FunctionTool adapter
+    ├── agent.py             # build_agent()
+    └── plugin.py            # Bot(Interface) — zoozl wiring
 ```
 
 ## Next Steps

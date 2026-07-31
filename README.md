@@ -31,16 +31,18 @@ A chatbot platform where bot personality and capabilities are entirely database 
 
 ```
 botforge/
-├── botforge/
-│   ├── __init__.py           # Package entry point
-│   ├── plugin.py              # zoozl Interface plugin
-│   ├── dynamic_tools.py        # BotConfig / DynamicTool / AdminGrant dataclasses
-│   ├── openai_tools.py         # ToolSpec → agents.FunctionTool adapter
-│   ├── session.py              # Sliding-window session management
-│   └── agent.py                # Agent assembly and bootstrap tool definitions
-└── tests/
-    └── test_bootstrap.py       # Unit tests for the core mechanism
+└── botforge/
+    ├── __init__.py         # Empty by design - keeps the layers below SDK-free
+    ├── tools.py            # ToolSpec: framework-neutral tool descriptor   ─┐
+    ├── dynamic_tools.py    # Dataclasses, bootstrap tools, tool contract    ├─ no SDK
+    ├── session.py          # Sliding-window conversation history           ─┘
+    ├── openai_tools.py     # ToolSpec → agents.FunctionTool adapter        ─┐
+    ├── agent.py            # build_agent(): assembles instructions + tools  ├─ framework
+    └── plugin.py           # Bot(Interface): zoozl wiring, the agent loop  ─┘
 ```
+
+Only the bottom three touch the agent framework, so swapping it means rewriting one
+adapter plus two call sites.
 
 ## Bootstrap tools
 
@@ -69,8 +71,15 @@ Every bot instance ships with these built-in tools:
 
 ## Testing
 
-```bash
-pytest tests/
-```
+There is no standing test suite. Tests get written when a bug is identified, and
+they target that specific bug — the goal is regression coverage for things that
+actually broke, not scaffolding maintained alongside development.
 
-Tests require `OPENAI_API_KEY` to be set for live API calls.
+When you do add one, install the dev extra and note that async tests need
+`asyncio_mode = auto` (a `pytest.ini` with that line, or the equivalent in
+`pyproject.toml`):
+
+```bash
+python -m venv .venv && .venv/bin/pip install -e '.[dev]'
+.venv/bin/python -m pytest path/to/test_the_bug.py
+```
