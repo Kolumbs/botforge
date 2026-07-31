@@ -142,16 +142,6 @@ Each bot is its own deployment with its own database file — they don't share a
 
 ## Testing
 
-There is no standing test suite. Tests get written when a bug is identified, and
-they target that specific bug — the goal is regression coverage for things that
-actually broke, not scaffolding maintained alongside development.
-
-When you do add one, install the dev extra and note that async tests need
-`asyncio_mode = auto` (a `pytest.ini` with that line, or the equivalent in
-`pyproject.toml`):
-
-```bash
-python -m venv .venv && .venv/bin/pip install -e '.[dev]'
-.venv/bin/python -m pytest path/to/test_the_bug.py
-```
-
+Tests are written by a dedicated testing persona/agent, never by the agent that
+wrote the feature or fixed the bug under test, and are read-only to implementers.
+See [CLAUDE.md](CLAUDE.md) for the full policy.
