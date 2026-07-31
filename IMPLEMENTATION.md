@@ -144,4 +144,4 @@ Each bot is its own deployment with its own database file — they don't share a
 
 Tests are written by a dedicated testing persona/agent, never by the agent that
 wrote the feature or fixed the bug under test, and are read-only to implementers.
-See the testing policy in [README.md](README.md#testing-policy).
+See the testing policy in [DEVELOPER.md](DEVELOPER.md#testing-policy).

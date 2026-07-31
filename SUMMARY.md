@@ -198,7 +198,7 @@ and chat the bot into existence following QUICK_START.md.
 
 Tests are written by a dedicated testing persona/agent, never by the agent that
 wrote the feature or fixed the bug under test, and are read-only to implementers.
-See the testing policy in [README.md](README.md#testing-policy).
+See the testing policy in [DEVELOPER.md](DEVELOPER.md#testing-policy).
 
 ## File Manifest
 
@@ -208,6 +208,7 @@ botforge/
 ├── pyproject.toml           # Package metadata, deps
 ├── README.md                # High-level overview
 ├── IMPLEMENTATION.md        # Detailed architecture
+├── DEVELOPER.md             # Dev setup, layering rules, testing policy
 ├── QUICK_START.md           # Step-by-step usage guide
 ├── SUMMARY.md               # This file
 └── botforge/
