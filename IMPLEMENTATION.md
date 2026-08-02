@@ -47,6 +47,7 @@ botforge is a minimal chatbot platform where bot personality and capabilities ar
    - A device ships with no administrator, provider or key, so there is nothing to run an agent with. `advance(memory, talker, text)` drives a plain state machine: pick a provider from `PROVIDERS`, then supply its key. The model is that provider's default and is never asked for — `set_provider` changes it later.
    - Each step is derived from what is in the database, not from conversation state, so a restart or dropped connection resumes where it left off.
    - Imports no LLM SDK, which is the whole point.
+   - Every line it says lives in `MESSAGES` and can be replaced from `[botforge.messages]`; `say()` falls back to the built-in if an override uses an unknown placeholder.
 
 7. **botforge/session.py** — Conversation history
    - `WindowedSession`: SDK-free SQLite conversation store that replays only the last N items to the LLM (default 10), avoiding prompt bloat while keeping full history persisted
@@ -159,6 +160,22 @@ unconfigured_prompt = """
 You are a bot that has not been given a character yet. Say so plainly, and
 tell the administrator they can give you a personality with set_instructions.
 """
+
+# Every line the device says for itself rather than through an LLM: the setup
+# exchange and the connect greeting. Override any subset; the rest keep their
+# defaults from setup.MESSAGES. Placeholders in braces are filled in, and an
+# override naming one that does not exist is ignored with a warning rather
+# than breaking the only way into the device.
+[botforge.messages]
+ask_provider = "System is not configured yet. Please supply agent provider (e.g. {providers})"
+bad_provider = "'{value}' is not correct provider. Please supply agent provider (e.g. {providers})"
+ask_password = "System is not configured yet. Please supply the admin password."
+provider_registered = "Provider registered. Please supply valid api-key of the provider."
+ask_key = "Please supply valid api-key of the provider."
+setup_in_progress = "This device is still being set up by its administrator."
+setup_complete = "Setup complete. Running {provider} on {model}."
+already_configured = "Setup is already complete."
+greeting = "Hello! I'm a bot on the kolumbs.net platform."
 ```
 
 Then run:

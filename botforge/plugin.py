@@ -43,11 +43,20 @@ class Bot(Interface):
         self.admin_password = conf.get("admin_password", "")
         # What a bot says before an administrator gives it a personality.
         self.unconfigured_prompt = conf.get("unconfigured_prompt", "")
+        # Every line the device says for itself, rather than through an LLM:
+        # the setup exchange plus the greeting. See setup.MESSAGES.
+        self.messages = conf.get("messages", {})
 
         # One file holds everything botforge owns: config, tools and history.
         self.database = os.path.abspath(conf.get("database", DEFAULT_DATABASE))
         self.memory = membank.LoadMemory(f"sqlite:///{self.database}")
         self.applied_key = None
+
+    def setup_step(self, talker, text):
+        """One turn of the pre-LLM setup exchange."""
+        return setup.advance(
+            self.memory, talker, text, self.admin_password, self.messages
+        )
 
     def apply_provider_key(self):
         """Hand the SDK the stored key, once per change rather than per turn."""
@@ -69,20 +78,15 @@ class Bot(Interface):
         ):
             setup.reset(self.memory)
             self.applied_key = None
-            package.callback(setup.advance(self.memory, talker, "", self.admin_password))
+            package.callback(self.setup_step(talker, ""))
             return
 
         if not setup.is_configured(self.memory):
-            package.callback(
-                setup.advance(self.memory, talker, text, self.admin_password)
-            )
+            package.callback(self.setup_step(talker, text))
             return
 
         if not text:
-            package.callback(
-                "Hello! I'm a bot on the kolumbs.net platform. If you're the admin, "
-                "you can teach me new capabilities."
-            )
+            package.callback(setup.say(self.messages, "greeting"))
             return
 
         self.apply_provider_key()
