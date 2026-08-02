@@ -1,11 +1,19 @@
 """Agent assembly from stored configuration and tools."""
 
+import logging
 import os
 
 from agents import Agent, set_default_openai_key
 
-from .dynamic_tools import build_bootstrap_tool_specs, build_dynamic_tool_specs
+from .dynamic_tools import (
+    ROOT_AGENT,
+    build_bootstrap_tool_specs,
+    build_dynamic_tool_specs,
+)
 from .openai_tools import to_function_tools
+
+
+log = logging.getLogger(__name__)
 
 
 UNCONFIGURED_PROMPT = (
@@ -60,32 +68,62 @@ def resolve_model(name):
     return LitellmModel(model=name)
 
 
-def build_agent(memory, default_model=DEFAULT_MODEL):
+def build_agent(memory, default_model=DEFAULT_MODEL, name=ROOT_AGENT):
     """Assemble an Agent from stored configuration and tools.
+
+    Agents that name this one in ``exposed_to`` are built too and attached as
+    tools, so the returned agent can delegate to them. Only the root agent
+    carries the bootstrap tools; a specialist gets just its own.
 
     Credentials are not handled here - see ``configure_provider``, which runs
     once at startup rather than on every turn.
 
     :param memory: a membank.LoadMemory (SQLite dataclass store).
-    :param default_model: model to use when the stored config names none.
+    :param default_model: model to use when a stored config names none.
+    :param name: which agent to build; defaults to the one people talk to.
     :return: an agents.Agent ready to run.
     """
-    instructions = UNCONFIGURED_PROMPT
+    return _build(memory, name, default_model, frozenset())
+
+
+def _build(memory, name, default_model, building):
+    """Build one agent, recursing into whatever delegates from it."""
+    config = memory.get.botconfig(name=name)
+
+    instructions = UNCONFIGURED_PROMPT if name == ROOT_AGENT else ""
     model = default_model
+    if config:
+        instructions = config.instructions or config.description or instructions
+        model = config.model or model
 
-    bot_config = memory.get.botconfig(id=1)
-    if bot_config:
-        if bot_config.instructions:
-            instructions = bot_config.instructions
-        if bot_config.model:
-            model = bot_config.model
+    specs = build_dynamic_tool_specs(memory, agent=name)
+    if name == ROOT_AGENT:
+        specs = build_bootstrap_tool_specs() + specs
 
-    specs = build_bootstrap_tool_specs() + build_dynamic_tool_specs(memory)
     context = {"memory": memory, "talker": ""}  # talker is filled in per call
+    tools = to_function_tools(specs, context)
+
+    building = building | {name}
+    for sub in memory.get("botconfig"):
+        if sub.exposed_to != name:
+            continue
+        if sub.name in building:
+            log.warning(
+                "Not delegating from %r to %r: that would loop back on itself.",
+                name,
+                sub.name,
+            )
+            continue
+        tools.append(
+            _build(memory, sub.name, default_model, building).as_tool(
+                tool_name=sub.name,
+                tool_description=sub.description or f"Delegate to the {sub.name} agent.",
+            )
+        )
 
     return Agent(
-        name="botforge",
+        name=name,
         instructions=instructions,
         model=resolve_model(model),
-        tools=to_function_tools(specs, context),
+        tools=tools,
     )

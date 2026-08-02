@@ -38,13 +38,20 @@ so return a string.
 """
 
 
+# The agent a person talks to. Every other agent is reached by delegation from
+# it, so this name is the entry point rather than just a default.
+ROOT_AGENT = "main"
+
+
 @dataclasses.dataclass
 class BotConfig:
-    """Singleton row (id=1) holding the bot's instructions and model choice."""
+    """One agent: its personality, model, and who may delegate to it."""
 
-    id: int = dataclasses.field(default=1, metadata={"key": True})
+    name: str = dataclasses.field(default=ROOT_AGENT, metadata={"key": True})
     instructions: str = ""
-    model: str = "gpt-4o-mini"
+    model: str = ""
+    description: str = ""  # shown to the agent that calls this one as a tool
+    exposed_to: str = ""   # agent that may delegate here; empty means nobody
     updated_at: str = ""
 
 
@@ -61,6 +68,7 @@ class DynamicTool:
     """A tool definition stored in the database."""
 
     name: str = dataclasses.field(default=None, metadata={"key": True})
+    agent: str = ROOT_AGENT
     description: str = ""
     source_code: str = ""  # written against the contract in TOOL_CONTRACT
     enabled: bool = True
@@ -84,10 +92,33 @@ class GrantAdminParams(AdminAuthBase):
 class SetInstructionsParams(AdminAuthBase):
     """Parameters for set_instructions."""
 
-    text: str = pydantic.Field(description="The bot's new system instructions/personality.")
+    text: str = pydantic.Field(description="The agent's new system instructions/personality.")
     model: str = pydantic.Field(
         default="",
-        description="(Optional) The OpenAI model to use (e.g., gpt-4o-mini). Leave empty to keep current.",
+        description=(
+            "(Optional) Model to use. A bare name such as gpt-4o-mini uses OpenAI; "
+            "a provider-qualified name such as anthropic/claude-opus-5 uses LiteLLM. "
+            "Leave empty to keep the current one."
+        ),
+    )
+    agent: str = pydantic.Field(
+        default=ROOT_AGENT,
+        description=f"Which agent to configure. Defaults to '{ROOT_AGENT}', the one people talk to.",
+    )
+
+
+class DefineAgentParams(AdminAuthBase):
+    """Parameters for define_agent."""
+
+    name: str = pydantic.Field(description="Name for the agent, e.g. 'bookkeeper'.")
+    description: str = pydantic.Field(
+        description="What this agent handles. The delegating agent reads this to decide when to call it."
+    )
+    instructions: str = pydantic.Field(description="The agent's system instructions.")
+    model: str = pydantic.Field(default="", description="(Optional) Model for this agent.")
+    exposed_to: str = pydantic.Field(
+        default=ROOT_AGENT,
+        description=f"Agent that may delegate to this one. Defaults to '{ROOT_AGENT}'.",
     )
 
 
@@ -97,6 +128,10 @@ class DefineToolParams(AdminAuthBase):
     name: str = pydantic.Field(description="The name of the tool (will be callable as this name).")
     description: str = pydantic.Field(description="A brief description of what the tool does.")
     source_code: str = pydantic.Field(description="Python source code. " + TOOL_CONTRACT)
+    agent: str = pydantic.Field(
+        default=ROOT_AGENT,
+        description=f"Which agent gets this tool. Defaults to '{ROOT_AGENT}'.",
+    )
 
 
 class DisableToolParams(AdminAuthBase):
@@ -211,7 +246,7 @@ async def set_instructions(ctx: dict, params: SetInstructionsParams) -> str:
 
     try:
         now = datetime.now(timezone.utc).isoformat()
-        config = memory.get.botconfig(id=1)
+        config = memory.get.botconfig(name=params.agent)
 
         if config:
             config.instructions = params.text
@@ -220,15 +255,69 @@ async def set_instructions(ctx: dict, params: SetInstructionsParams) -> str:
             config.updated_at = now
         else:
             config = BotConfig(
-                id=1,
+                name=params.agent,
                 instructions=params.text,
-                model=params.model or "gpt-4o-mini",
+                model=params.model,
                 updated_at=now,
             )
         memory.put(config)
-        return f"Instructions updated. Model: {config.model}."
+        return f"Instructions updated for '{config.name}'."
     except Exception as e:
         return f"Failed to set instructions: {e}"
+
+
+async def define_agent(ctx: dict, params: DefineAgentParams) -> str:
+    """Create or update an agent that another agent can delegate to (admin-only)."""
+    memory = ctx.get("memory")
+    talker = ctx.get("talker")
+
+    if not _is_admin_talker(memory, talker):
+        return "You must be admin to define agents. Call claim_admin first."
+
+    if params.name == params.exposed_to:
+        return "An agent cannot delegate to itself."
+
+    try:
+        config = memory.get.botconfig(name=params.name) or BotConfig(name=params.name)
+        config.description = params.description
+        config.instructions = params.instructions
+        config.exposed_to = params.exposed_to
+        if params.model:
+            config.model = params.model
+        config.updated_at = datetime.now(timezone.utc).isoformat()
+        memory.put(config)
+        return (
+            f"Agent '{params.name}' defined. "
+            f"'{params.exposed_to}' can now delegate to it."
+        )
+    except Exception as e:
+        return f"Failed to define agent: {e}"
+
+
+async def list_agents(ctx: dict, params: AdminAuthBase) -> str:
+    """List the agents and who may delegate to each."""
+    memory = ctx.get("memory")
+    configs = list(memory.get("botconfig"))
+
+    if not configs:
+        return "No agents configured yet."
+
+    tools_by_agent = {}
+    for tool in memory.get("dynamictool"):
+        tools_by_agent.setdefault(tool.agent, []).append(tool.name)
+
+    lines = []
+    for config in configs:
+        owned = ", ".join(sorted(tools_by_agent.get(config.name, []))) or "no tools"
+        if config.name == ROOT_AGENT:
+            where = "talks to people"
+        elif config.exposed_to:
+            where = f"called by {config.exposed_to}"
+        else:
+            where = "not reachable - no agent delegates to it"
+        lines.append(f"  - {config.name} ({where}): {owned}")
+
+    return "Agents:\n" + "\n".join(lines)
 
 
 async def define_tool(ctx: dict, params: DefineToolParams) -> str:
@@ -253,9 +342,10 @@ async def define_tool(ctx: dict, params: DefineToolParams) -> str:
             created_by=talker,
             updated_at=now,
             contract_version=CONTRACT_VERSION,
+            agent=params.agent,
         )
         memory.put(tool)
-        return f"Tool '{params.name}' defined successfully."
+        return f"Tool '{params.name}' defined successfully for agent '{params.agent}'."
     except Exception as e:
         return f"Failed to persist tool: {e}"
 
@@ -272,7 +362,7 @@ async def list_tools(ctx: dict, params: AdminAuthBase) -> str:
     lines = ["Defined tools:"]
     for tool in tools:
         status = "enabled" if tool.enabled else "disabled"
-        lines.append(f"  - {tool.name} ({status}): {tool.description}")
+        lines.append(f"  - {tool.name} [{tool.agent}] ({status}): {tool.description}")
 
     return "\n".join(lines)
 
@@ -327,6 +417,22 @@ def build_bootstrap_tool_specs() -> list[ToolSpec]:
             handler=define_tool,
         ),
         ToolSpec(
+            name="define_agent",
+            description=(
+                "Create or update a specialist agent that this one can delegate to "
+                "(admin-only). Give it its own instructions, then attach tools to it "
+                "with define_tool(agent=...)."
+            ),
+            params=DefineAgentParams,
+            handler=define_agent,
+        ),
+        ToolSpec(
+            name="list_agents",
+            description="List the agents, who may delegate to each, and the tools each owns.",
+            params=AdminAuthBase,
+            handler=list_agents,
+        ),
+        ToolSpec(
             name="list_tools",
             description="List all defined tools and their status.",
             params=AdminAuthBase,
@@ -341,13 +447,17 @@ def build_bootstrap_tool_specs() -> list[ToolSpec]:
     ]
 
 
-def build_dynamic_tool_specs(memory):
-    """Load enabled DynamicTool rows and return them as ToolSpec descriptors.
+def build_dynamic_tool_specs(memory, agent=ROOT_AGENT):
+    """Load one agent's enabled DynamicTool rows as ToolSpec descriptors.
 
     Returns framework-neutral specs; binding them to an agent framework is the
     caller's job (see ``agent.build_agent``).
     """
-    tools = [tool for tool in memory.get("dynamictool") if tool.enabled]
+    tools = [
+        tool
+        for tool in memory.get("dynamictool")
+        if tool.enabled and tool.agent == agent
+    ]
 
     specs = []
     for tool in tools:

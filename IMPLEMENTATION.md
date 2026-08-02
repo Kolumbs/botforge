@@ -9,15 +9,16 @@ botforge is a minimal chatbot platform where bot personality and capabilities ar
 ### Core Components
 
 1. **botforge/dynamic_tools.py** — Dataclasses for persistence + bootstrap tools
-   - `BotConfig`: Singleton row with bot's instructions and model choice
+   - `BotConfig`: One row per agent — instructions, model, and `exposed_to` (which agent may delegate to it). The agent named `main` is the one people talk to.
    - `AdminGrant`: Tracks which session talkers have admin privileges
-   - `DynamicTool`: Stores tool definitions (name, description, Python source code)
+   - `DynamicTool`: Stores tool definitions (name, description, Python source code, and the `agent` that owns it)
    - Bootstrap tools that can't themselves be dynamic (they're needed to write to the DB):
      - `claim_admin()`: First caller becomes admin
      - `grant_admin(talker)`: Admin grants privileges to another session
      - `set_instructions(text, model?)`: Admin sets bot's personality
-     - `define_tool(name, description, source_code)`: Admin creates new tools
-     - `list_tools()`, `disable_tool(name)`: Tool management
+     - `define_tool(name, description, source_code, agent?)`: Admin creates new tools
+     - `define_agent(name, description, instructions, exposed_to?)`: Admin creates a specialist the caller can delegate to
+     - `list_tools()`, `list_agents()`, `disable_tool(name)`: Management
 
 2. **botforge/tools.py** — `ToolSpec`: the framework-neutral tool descriptor (name, description, Params pydantic model, handler). Imports no LLM SDK, so the tool layer stays independent of the agent framework.
 
@@ -50,9 +51,9 @@ botforge opens its own `membank.LoadMemory` over the file named by `database` in
 membank is a SQLite dataclass ORM, so each `@dataclass` becomes a table. Conversation history is log-shaped rather than dataclass-shaped, so `session.py` manages its own table in the same file:
 
 ```sql
-CREATE TABLE botconfig   (id INTEGER PRIMARY KEY, instructions TEXT, model TEXT, updated_at TEXT);
+CREATE TABLE botconfig   (name TEXT PRIMARY KEY, instructions TEXT, model TEXT, description TEXT, exposed_to TEXT, updated_at TEXT);
 CREATE TABLE admingrant  (talker TEXT PRIMARY KEY, granted_at TEXT);
-CREATE TABLE dynamictool (name TEXT PRIMARY KEY, description TEXT, source_code TEXT, enabled BOOLEAN, created_by TEXT, updated_at TEXT, contract_version INTEGER);
+CREATE TABLE dynamictool (name TEXT PRIMARY KEY, agent TEXT, description TEXT, source_code TEXT, enabled BOOLEAN, created_by TEXT, updated_at TEXT, contract_version INTEGER);
 CREATE TABLE conversation_items (id INTEGER PRIMARY KEY AUTOINCREMENT, session_id TEXT, payload TEXT);
 ```
 
@@ -64,6 +65,16 @@ Bootstrap tools are the only hardcoded Python functions in the system. They're a
 2. **Admin calls `set_instructions(text, model?)`** — updates the singleton `BotConfig` row. On the next message, the agent will use the new instructions.
 3. **Admin calls `define_tool(name, description, source_code)`** — `exec`s the source to validate it defines `Params` (a pydantic model) and `handler` (an async function). If valid, stores it in the `DynamicTool` table. On the next message, the new tool appears in the agent's tool list.
 4. **Subsequent messages** — the agent rebuilds from BotConfig + all enabled DynamicTools, no restart needed.
+
+### Delegation
+
+`main` is the agent a person talks to. `define_agent` creates a specialist and
+names which agent may delegate to it; `build_agent` attaches each specialist to
+its parent via the SDK's `Agent.as_tool()`, recursively. Only `main` carries the
+bootstrap tools — a specialist gets just the tools assigned to it with
+`define_tool(agent=...)`, so the admin surface is not reachable from inside a
+delegated call. Delegation cycles are refused at definition time and again when
+building, so a loop logs a warning instead of recursing forever.
 
 ### Admin Authorization
 
