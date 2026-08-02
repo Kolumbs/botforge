@@ -1,9 +1,8 @@
 """Agent assembly from stored configuration and tools."""
 
 import logging
-import os
 
-from agents import Agent, set_default_openai_key
+from agents import Agent
 
 from .dynamic_tools import (
     ROOT_AGENT,
@@ -29,32 +28,13 @@ UNCONFIGURED_PROMPT = (
 DEFAULT_MODEL = "gpt-4o-mini"
 
 
-def configure_provider(conf):
-    """Apply LLM credentials. Called once at startup, not per turn.
-
-    ``api_key`` configures the SDK's native OpenAI path. Any other provider is
-    reached through LiteLLM, which takes its credentials from the environment,
-    so ``[botforge.env]`` entries are exported here.
-    """
-    api_key = conf.get("api_key")
-    env = conf.get("env") or {}
-    if not api_key and not env:
-        raise RuntimeError(
-            "botforge needs LLM credentials: set 'api_key' for OpenAI, or "
-            "[botforge.env] entries for another provider"
-        )
-    if api_key:
-        set_default_openai_key(api_key)
-    for name, value in env.items():
-        os.environ[name] = str(value)
-
-
-def resolve_model(name):
+def resolve_model(name, api_key):
     """Return something an Agent can use as its model.
 
-    A bare name (``gpt-4o-mini``) uses the SDK's native OpenAI path. A
-    provider-qualified name (``anthropic/claude-opus-5``, ``gemini/...``) goes
-    through LiteLLM, which the SDK ships as an optional extra.
+    A bare name (``gpt-4o-mini``) uses the SDK's OpenAI path, which reads the
+    key configured at startup. A provider-qualified name
+    (``anthropic/claude-opus-5``, ``gemini/...``) goes through LiteLLM, which
+    the SDK ships as an optional extra and which is handed the same key.
     """
     if "/" not in name:
         return name
@@ -65,33 +45,31 @@ def resolve_model(name):
             f"Model {name!r} names a provider, which needs LiteLLM. "
             "Install it with: pip install 'botforge[litellm]'"
         ) from None
-    return LitellmModel(model=name)
+    return LitellmModel(model=name, api_key=api_key)
 
 
-def build_agent(memory, default_model=DEFAULT_MODEL, name=ROOT_AGENT):
+def build_agent(memory, conf, name=ROOT_AGENT):
     """Assemble an Agent from stored configuration and tools.
 
     Agents that name this one in ``exposed_to`` are built too and attached as
     tools, so the returned agent can delegate to them. Only the root agent
     carries the bootstrap tools; a specialist gets just its own.
 
-    Credentials are not handled here - see ``configure_provider``, which runs
-    once at startup rather than on every turn.
-
     :param memory: a membank.LoadMemory (SQLite dataclass store).
-    :param default_model: model to use when a stored config names none.
+    :param conf: the ``[botforge]`` config section, for ``api_key`` and the
+        default ``model``.
     :param name: which agent to build; defaults to the one people talk to.
     :return: an agents.Agent ready to run.
     """
-    return _build(memory, name, default_model, frozenset())
+    return _build(memory, name, conf, frozenset())
 
 
-def _build(memory, name, default_model, building):
+def _build(memory, name, conf, building):
     """Build one agent, recursing into whatever delegates from it."""
     config = memory.get.botconfig(name=name)
 
     instructions = UNCONFIGURED_PROMPT if name == ROOT_AGENT else ""
-    model = default_model
+    model = conf.get("model", DEFAULT_MODEL)
     if config:
         instructions = config.instructions or config.description or instructions
         model = config.model or model
@@ -115,7 +93,7 @@ def _build(memory, name, default_model, building):
             )
             continue
         tools.append(
-            _build(memory, sub.name, default_model, building).as_tool(
+            _build(memory, sub.name, conf, building).as_tool(
                 tool_name=sub.name,
                 tool_description=sub.description or f"Delegate to the {sub.name} agent.",
             )
@@ -124,6 +102,6 @@ def _build(memory, name, default_model, building):
     return Agent(
         name=name,
         instructions=instructions,
-        model=resolve_model(model),
+        model=resolve_model(model, conf.get("api_key")),
         tools=tools,
     )
