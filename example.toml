@@ -1,0 +1,107 @@
+# botforge example configuration
+#
+# Every value here is optional. A device can boot with nothing but the
+# extensions line below and be configured entirely by talking to it - the
+# provider, the API key, the bot's personality and all of its tools are
+# stored in the database, not here.
+#
+# What does belong here is the platform's own bootstrapping: where to keep
+# the database, and the words the device says while it is speaking for
+# itself rather than through an LLM. Those are reproduced below with their
+# built-in defaults, so this file doubles as a reference.
+
+# --- zoozl, the transport and routing layer ------------------------------
+
+# Point zoozl at the plugin module, not the package.
+extensions = ["botforge.plugin"]
+
+# zoozl's own store, for its conversation routing. Separate from botforge's
+# database below, and optional - without it zoozl keeps that state in memory.
+# memory_path = "sqlite://zoozl_routing.db"
+
+# --- botforge ------------------------------------------------------------
+
+[botforge]
+
+# Where botforge keeps everything it owns: the provider, agents, tools and
+# conversation history, all in one SQLite file.
+database = "botforge.db"
+
+# Which zoozl aliases route to this bot.
+aliases = ["bot", "help", "greet"]
+
+# How many recent messages are replayed to the model each turn.
+history_window = 10
+
+# If set, this password is required to claim an unconfigured device.
+# Leave it out and the first person to reach the device becomes its
+# administrator - reasonable on a private channel, less so on a phone
+# number, where a wrong number would gain the ability to run code.
+# admin_password = "change-me"
+
+# What a bot says before an administrator has given it a personality.
+# To change a running bot, an administrator uses set_instructions instead;
+# this is only the starting point.
+unconfigured_prompt = """
+You are a bot on the kolumbs.net platform that has not been given a character yet.
+
+Say so plainly, and tell the administrator they can:
+- give you a personality with **set_instructions(text)**
+- teach you a capability with **define_tool(name, description, source_code)**
+- create a specialist to delegate to with **define_agent(...)**
+- change the model or key with **set_provider(...)**
+
+Call **list_tools()** or **list_agents()** to show what already exists. Only the administrator can change any of this.
+"""
+
+# --- what the device says for itself -------------------------------------
+#
+# The first-boot exchange happens before any LLM is configured, so these
+# lines are spoken by botforge directly. Override any subset; anything left
+# out keeps the default shown here. Placeholders in braces are filled in,
+# and an override naming one that does not exist is ignored with a warning
+# rather than breaking the only way into the device.
+#
+#   {providers}  the configured provider names (openai, claude, gemini)
+#   {value}      what the administrator typed, when it was not a provider
+#   {provider}   the chosen provider, on completion
+#   {model}      that provider's default model, on completion
+
+[botforge.messages]
+# First contact, and whenever the provider is still unset.
+ask_provider = "System is not configured yet. Please supply agent provider (e.g. {providers})"
+
+# The name given was not one we know.
+bad_provider = "'{value}' is not correct provider. Please supply agent provider (e.g. {providers})"
+
+# Only used when admin_password is set.
+ask_password = "System is not configured yet. Please supply the admin password."
+
+# Provider accepted; now we need its key.
+provider_registered = "Provider registered. Please supply valid api-key of the provider."
+
+# Re-prompt if the key looked wrong.
+ask_key = "Please supply valid api-key of the provider."
+
+# Said to anyone who is not the administrator, mid-setup.
+setup_in_progress = "This device is still being set up by its administrator."
+
+# The last line of setup.
+setup_complete = "Setup complete. Running {provider} on {model}. You can give me a personality, teach me tools, or change the model just by asking."
+
+# Setup was somehow reached after it finished.
+already_configured = "Setup is already complete."
+
+# Said on connect once the device is configured.
+greeting = "Hello! I'm a bot on the kolumbs.net platform. If you're the admin, you can teach me new capabilities."
+
+# --- transports ----------------------------------------------------------
+#
+# Whichever channels zoozl should listen on. See the zoozl documentation.
+
+# [websocket]
+# port = 8000
+
+# [slack]
+# signing_secret = "..."
+# workspace_token = "..."

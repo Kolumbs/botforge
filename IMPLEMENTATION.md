@@ -141,42 +141,10 @@ The engine:
 
 ## Configuration
 
-Create a TOML file (e.g., `my_bot.toml`):
-
-```toml
-[botforge]
-# Everything is optional. A device can boot with an empty section and be
-# configured entirely by talking to it.
-database = "my_bot.db"      # where botforge keeps its data (default botforge.db)
-aliases = ["bot", "help"]   # which zoozl aliases route here
-history_window = 10         # how many messages to replay per turn
-admin_password = "..."      # if set, required to claim the device; otherwise
-                            # the first person to reach it becomes admin
-
-# What a bot says before an administrator has given it a personality. This is
-# the platform's own bootstrapping text - to change a running bot, an
-# administrator uses set_instructions instead.
-unconfigured_prompt = """
-You are a bot that has not been given a character yet. Say so plainly, and
-tell the administrator they can give you a personality with set_instructions.
-"""
-
-# Every line the device says for itself rather than through an LLM: the setup
-# exchange and the connect greeting. Override any subset; the rest keep their
-# defaults from setup.MESSAGES. Placeholders in braces are filled in, and an
-# override naming one that does not exist is ignored with a warning rather
-# than breaking the only way into the device.
-[botforge.messages]
-ask_provider = "System is not configured yet. Please supply agent provider (e.g. {providers})"
-bad_provider = "'{value}' is not correct provider. Please supply agent provider (e.g. {providers})"
-ask_password = "System is not configured yet. Please supply the admin password."
-provider_registered = "Provider registered. Please supply valid api-key of the provider."
-ask_key = "Please supply valid api-key of the provider."
-setup_in_progress = "This device is still being set up by its administrator."
-setup_complete = "Setup complete. Running {provider} on {model}."
-already_configured = "Setup is already complete."
-greeting = "Hello! I'm a bot on the kolumbs.net platform."
-```
+Copy [example.toml](example.toml) and edit it. Every value is optional — a
+device can boot with nothing but the `extensions` line and be configured
+entirely by talking to it. The example carries all the defaults inline, so it
+also serves as the reference for what can be set.
 
 Then run:
 
@@ -184,17 +152,11 @@ Then run:
 python -m zoozl my_bot.toml
 ```
 
-zoozl imports each module named in `extensions`, discovers the `Interface` subclass in it, and starts the server. Point it at the plugin module, not the package:
-
-```toml
-extensions = ["botforge.plugin"]
-# memory_path is zoozl's own store for conversation routing. It is separate
-# from botforge's `database` above, and optional - unset means zoozl keeps
-# that state in memory only.
-memory_path = "sqlite://zoozl_routing.db"
-```
-
-Connect via Slack, WebSocket, or email depending on config.
+zoozl imports each module named in `extensions`, discovers the `Interface`
+subclass in it, and starts the server — so `extensions` must name
+`botforge.plugin`, the module, not the package. zoozl's own `memory_path` is a
+separate store for its conversation routing and is unrelated to botforge's
+`database`. Connect via Slack, WebSocket, or email depending on config.
 
 ## Deployment
 

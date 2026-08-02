@@ -13,16 +13,7 @@ A chatbot platform where bot personality and capabilities are entirely database 
 ## Getting started
 
 1. Install: `pip install -e .` (depends on `zoozl>=0.2.9` and `openai-agents`).
-2. Configure: create a TOML config file (e.g. `my_bot.toml`). Everything is optional:
-   ```toml
-   [botforge]
-   database = "my_bot.db"
-   aliases = ["bot", "help", "greet"]
-
-   [slack]
-   signing_secret = "..."
-   workspace_token = "..."
-   ```
+2. Configure: copy [example.toml](example.toml) and edit it. Everything is optional — the example lists every setting with its default.
 3. Run: `python -m zoozl my_bot.toml` (the config needs `extensions = ["botforge.plugin"]`)
 4. Chat: the device has no LLM yet, so it asks for a provider (`openai`, `claude`, `gemini`) and that provider's API key. The model is the provider's default and can be changed later just by asking.
 

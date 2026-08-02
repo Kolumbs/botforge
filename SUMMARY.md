@@ -205,6 +205,7 @@ See the testing policy in [DEVELOPER.md](DEVELOPER.md#testing-policy).
 ```
 botforge/
 ├── .gitignore
+├── example.toml             # Reference config, with every default inline
 ├── pyproject.toml           # Package metadata, deps
 ├── README.md                # High-level overview
 ├── IMPLEMENTATION.md        # Detailed architecture
