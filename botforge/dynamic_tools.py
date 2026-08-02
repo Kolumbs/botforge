@@ -17,10 +17,8 @@ from .tools import ToolSpec
 log = logging.getLogger(__name__)
 
 
-# The dynamic-tool contract. Stored tool source lives in the database, so this
-# shape cannot be changed by editing source files - every tool ever authored by
-# chat is written against it. Bump CONTRACT_VERSION if it ever has to change,
-# and migrate or re-author the stored rows.
+# Stored tool source is written against this contract, so changing its shape
+# means bumping the version and migrating or re-authoring the stored rows.
 CONTRACT_VERSION = 1
 
 TOOL_CONTRACT = """\
@@ -68,12 +66,7 @@ class DynamicTool:
     enabled: bool = True
     created_by: str = ""
     updated_at: str = ""
-    # Which contract revision the source was written against, so a tool stored
-    # under an older shape is skipped loudly instead of exec'd blindly.
     contract_version: int = CONTRACT_VERSION
-
-
-# Bootstrap tool parameter models
 
 
 class AdminAuthBase(pydantic.BaseModel):
@@ -174,9 +167,6 @@ def load_tool_source(source_code):
     return params_model, handler, None
 
 
-# Bootstrap tools (always registered, the mechanism that makes everything else possible)
-
-
 async def claim_admin(ctx: dict, params: AdminAuthBase) -> str:
     """Claim admin privileges if nobody has claimed them yet."""
     memory = ctx.get("memory")
@@ -249,8 +239,6 @@ async def define_tool(ctx: dict, params: DefineToolParams) -> str:
     if not _is_admin_talker(memory, talker):
         return "You must be admin to define tools. Call claim_admin first."
 
-    # Validate against the contract before persisting anything, so a broken
-    # tool is reported in chat rather than stored and skipped later.
     _, _, error = load_tool_source(params.source_code)
     if error:
         return error
@@ -267,8 +255,6 @@ async def define_tool(ctx: dict, params: DefineToolParams) -> str:
             contract_version=CONTRACT_VERSION,
         )
         memory.put(tool)
-        # Bump the tools version so the plugin knows to rebuild the agent
-        ctx["tools_version_updated"] = True
         return f"Tool '{params.name}' defined successfully."
     except Exception as e:
         return f"Failed to persist tool: {e}"
@@ -305,13 +291,12 @@ async def disable_tool(ctx: dict, params: DisableToolParams) -> str:
             return f"Tool '{params.name}' not found."
         tool.enabled = False
         memory.put(tool)
-        ctx["tools_version_updated"] = True
         return f"Tool '{params.name}' disabled."
     except Exception as e:
         return f"Failed to disable tool: {e}"
 
 
-def _build_bootstrap_tool_specs() -> list[ToolSpec]:
+def build_bootstrap_tool_specs() -> list[ToolSpec]:
     """Build the ToolSpec descriptors for all bootstrap tools."""
     return [
         ToolSpec(
@@ -378,8 +363,6 @@ def build_dynamic_tool_specs(memory):
 
         params_model, handler, error = load_tool_source(tool.source_code)
         if error:
-            # Stored source that no longer loads - surfaced here rather than
-            # silently vanishing from the agent's tool list.
             log.warning("Skipping tool %r: %s", tool.name, error)
             continue
 

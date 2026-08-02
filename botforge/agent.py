@@ -1,12 +1,8 @@
-"""Agent assembly and bootstrap tool registration."""
+"""Agent assembly from stored configuration and tools."""
 
 from agents import Agent, set_default_openai_key
 
-from .dynamic_tools import (
-    BotConfig,
-    _build_bootstrap_tool_specs,
-    build_dynamic_tool_specs,
-)
+from .dynamic_tools import build_bootstrap_tool_specs, build_dynamic_tool_specs
 from .openai_tools import to_function_tools
 
 
@@ -29,7 +25,6 @@ def build_agent(conf, memory, model=None):
     :param model: optional override for the model. Falls back to conf, then BotConfig, then default.
     :return: an agents.Agent ready to run.
     """
-    # Configure the OpenAI API key
     try:
         api_key = conf["api_key"]
     except KeyError:
@@ -37,7 +32,6 @@ def build_agent(conf, memory, model=None):
 
     set_default_openai_key(api_key)
 
-    # Load the bot's instructions and model from the database
     instructions = UNCONFIGURED_PROMPT
     actual_model = model or conf.get("model", "gpt-4o-mini")
 
@@ -48,9 +42,7 @@ def build_agent(conf, memory, model=None):
         if bot_config.model:
             actual_model = bot_config.model
 
-    # Bootstrap tools are always present; dynamic tools come from the database.
-    # Both are neutral ToolSpecs, so a single adapter call binds the lot.
-    specs = _build_bootstrap_tool_specs() + build_dynamic_tool_specs(memory)
+    specs = build_bootstrap_tool_specs() + build_dynamic_tool_specs(memory)
     context = {"memory": memory, "talker": ""}  # talker is filled in per call
 
     return Agent(

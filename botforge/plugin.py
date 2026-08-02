@@ -45,9 +45,7 @@ class Bot(Interface):
         self.history_window = conf.get("history_window", 10)
         self.aliases = set(conf.get("aliases", ["bot", "help", "greet"]))
 
-        # One file holds everything botforge owns: the bot's configuration and
-        # tools (membank dataclass tables) plus conversation history (an
-        # append-only table session.py manages itself).
+        # One file holds everything botforge owns: config, tools and history.
         self.database = os.path.abspath(conf.get("database", DEFAULT_DATABASE))
         self.memory = membank.LoadMemory(f"sqlite:///{self.database}")
 
@@ -59,15 +57,14 @@ class Bot(Interface):
         text = package.last_message_text
 
         if not text:
-            # Initial greeting on connect.
             package.callback(
                 "Hello! I'm a botforge bot. If you're the admin, you can teach me "
                 "new capabilities."
             )
             return
 
-        # Rebuilt each turn so define_tool/set_instructions take effect on the
-        # next message without restarting the process.
+        # Rebuilt each turn so tool and instruction edits take effect without
+        # restarting the process.
         self.agent = build_agent(self.conf, self.memory)
 
         result = await Runner.run(
