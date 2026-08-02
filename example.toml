@@ -5,10 +5,8 @@
 # provider, the API key, the bot's personality and all of its tools are
 # stored in the database, not here.
 #
-# What does belong here is the platform's own bootstrapping: where to keep
-# the database, and the words the device says while it is speaking for
-# itself rather than through an LLM. Those are reproduced below with their
-# built-in defaults, so this file doubles as a reference.
+# None of the words the device says live in the Python source either. They
+# come from a locale file; see `language` below.
 
 # --- zoozl, the transport and routing layer ------------------------------
 
@@ -39,62 +37,36 @@ history_window = 10
 # number, where a wrong number would gain the ability to run code.
 # admin_password = "change-me"
 
-# What a bot says before an administrator has given it a personality. There is
-# no copy of this in the code - leave it out and a fresh bot simply has no
-# instructions until someone calls set_instructions. To change a running bot,
-# an administrator uses set_instructions rather than editing this.
-unconfigured_prompt = """
-You are a bot on the kolumbs.net platform that has not been given a character yet.
-
-Say so plainly, and tell the administrator they can:
-- give you a personality with **set_instructions(text)**
-- teach you a capability with **define_tool(name, description, source_code)**
-- create a specialist to delegate to with **define_agent(...)**
-- change the model or key with **set_provider(...)**
-
-Call **list_tools()** or **list_agents()** to show what already exists. Only the administrator can change any of this.
-"""
-
-# --- what the device says for itself -------------------------------------
+# --- language ------------------------------------------------------------
 #
-# The first-boot exchange happens before any LLM is configured, so these
-# lines are spoken by botforge directly. Override any subset; anything left
-# out keeps the default shown here. Placeholders in braces are filled in,
-# and an override naming one that does not exist is ignored with a warning
-# rather than breaking the only way into the device.
+# Everything the device says for itself - the whole first-boot exchange, the
+# connect greeting, and what a bot says before it has been given a
+# personality - comes from a locale file. Nothing is hardcoded in English,
+# so a device can be built for a language botforge does not ship.
 #
-#   {providers}  the configured provider names (openai, claude, gemini)
-#   {value}      what the administrator typed, when it was not a provider
-#   {provider}   the chosen provider, on completion
-#   {model}      that provider's default model, on completion
+# Either the name of a bundled locale in botforge/locales/, or the path to a
+# TOML file of the same shape. Copy botforge/locales/en.toml, translate it,
+# and point at it:
+#
+#   language = "/etc/botforge/lv.toml"
+#
+# A locale must define every message; a missing one is reported when the
+# device starts rather than part-way through a conversation.
+language = "en"
 
-[botforge.messages]
-# First contact, and whenever the provider is still unset.
-ask_provider = "System is not configured yet. Please supply agent provider (e.g. {providers})"
+# Individual lines can still be overridden without a whole locale file.
+# These win over whatever the locale says. Placeholders in braces are filled
+# in - see botforge/locales/en.toml for which ones each message may use.
+#
+# [botforge.messages]
+# ask_provider = "Which provider should I use? ({providers})"
 
-# The name given was not one we know.
-bad_provider = "'{value}' is not correct provider. Please supply agent provider (e.g. {providers})"
-
-# Only used when admin_password is set.
-ask_password = "System is not configured yet. Please supply the admin password."
-
-# Provider accepted; now we need its key.
-provider_registered = "Provider registered. Please supply valid api-key of the provider."
-
-# Re-prompt if the key looked wrong.
-ask_key = "Please supply valid api-key of the provider."
-
-# Said to anyone who is not the administrator, mid-setup.
-setup_in_progress = "This device is still being set up by its administrator."
-
-# The last line of setup.
-setup_complete = "Setup complete. Running {provider} on {model}. You can give me a personality, teach me tools, or change the model just by asking."
-
-# Setup was somehow reached after it finished.
-already_configured = "Setup is already complete."
-
-# Said on connect once the device is configured.
-greeting = "Hello! I'm a bot on the kolumbs.net platform. If you're the admin, you can teach me new capabilities."
+# Likewise for the prompt a bot uses before it has a personality. To change
+# a running bot an administrator uses set_instructions instead.
+#
+# unconfigured_prompt = """
+# You are a bot that has not been given a character yet.
+# """
 
 # --- transports ----------------------------------------------------------
 #

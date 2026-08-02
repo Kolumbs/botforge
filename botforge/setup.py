@@ -11,11 +11,14 @@ conversation state, so a restart or a dropped connection resumes where it left
 off. Nothing here imports an LLM SDK - the whole point is that it works before
 one can be used.
 
-Every line the device says here is in MESSAGES and can be replaced from the
-``[botforge.messages]`` config section.
+No English lives here. Every line the device says comes from a locale file -
+``locales/en.toml`` by default - so a device can be built for another language
+by translating that file and pointing ``language`` at it.
 """
 
 import logging
+import pathlib
+import tomllib
 
 from .dynamic_tools import (
     PROVIDERS,
@@ -32,55 +35,69 @@ log = logging.getLogger(__name__)
 
 RESET_COMMAND = "/setup"
 
-# Each message stands on its own rather than being composed from the others,
-# so editing one in config cannot surprise you by changing another. Available
-# placeholders are named per entry.
-MESSAGES = {
-    # {providers}
-    "ask_provider": (
-        "System is not configured yet. "
-        "Please supply agent provider (e.g. {providers})"
-    ),
-    # {value}, {providers}
-    "bad_provider": (
-        "'{value}' is not correct provider. "
-        "Please supply agent provider (e.g. {providers})"
-    ),
-    "ask_password": "System is not configured yet. Please supply the admin password.",
-    "provider_registered": "Provider registered. Please supply valid api-key of the provider.",
-    "ask_key": "Please supply valid api-key of the provider.",
-    "setup_in_progress": "This device is still being set up by its administrator.",
-    # {provider}, {model}
-    "setup_complete": (
-        "Setup complete. Running {provider} on {model}. You can give me a "
-        "personality, teach me tools, or change the model just by asking."
-    ),
-    "already_configured": "Setup is already complete.",
-    # Said on connect once the device is configured, before anyone speaks.
-    "greeting": (
-        "Hello! I'm a bot on the kolumbs.net platform. If you're the admin, "
-        "you can teach me new capabilities."
-    ),
-}
+# The names of the lines a device needs, not their text. A locale file must
+# supply all of them; anything missing is caught when it is loaded rather than
+# part-way through a conversation.
+REQUIRED_MESSAGES = frozenset(
+    {
+        "ask_provider",
+        "bad_provider",
+        "ask_password",
+        "provider_registered",
+        "ask_key",
+        "setup_in_progress",
+        "setup_complete",
+        "already_configured",
+        "greeting",
+    }
+)
+
+LOCALES = pathlib.Path(__file__).parent / "locales"
+DEFAULT_LANGUAGE = "en"
+
+
+def load_locale(language=DEFAULT_LANGUAGE):
+    """Load a language's text: its unconfigured prompt and its messages.
+
+    ``language`` is either the name of a bundled locale (``en``) or a path to
+    a TOML file of the same shape, which is how a device gets a language
+    botforge does not ship.
+    """
+    path = pathlib.Path(language)
+    if path.suffix != ".toml" or not path.is_file():
+        path = LOCALES / f"{language}.toml"
+    if not path.is_file():
+        available = ", ".join(sorted(p.stem for p in LOCALES.glob("*.toml")))
+        raise RuntimeError(
+            f"No locale {language!r}. Bundled: {available}. "
+            "Or give the path to a .toml file of the same shape."
+        )
+
+    with open(path, "rb") as handle:
+        locale = tomllib.load(handle)
+
+    missing = REQUIRED_MESSAGES - set(locale.get("messages") or {})
+    if missing:
+        raise RuntimeError(
+            f"Locale {path} is missing messages: {', '.join(sorted(missing))}"
+        )
+    return locale
 
 
 def say(messages, key, **values):
-    """Render one message, falling back to the built-in on a bad override.
+    """Render one message from the loaded locale.
 
-    Setup is the only way into a device, so a mistyped placeholder in config
-    must not be able to make it unusable.
+    A placeholder the message cannot be given is left as written rather than
+    raising - setup is the only way into a device, so a typo in a translation
+    should degrade the wording, not block the exchange.
     """
     values.setdefault("providers", ", ".join(PROVIDERS))
-    template = (messages or {}).get(key, MESSAGES[key])
+    template = messages[key]
     try:
         return template.format(**values)
     except (KeyError, IndexError) as error:
-        log.warning(
-            "Ignoring configured message %r - it uses %s, which is not available here.",
-            key,
-            error,
-        )
-        return MESSAGES[key].format(**values)
+        log.warning("Message %r uses %s, which is not available here.", key, error)
+        return template
 
 
 def is_configured(memory):
@@ -94,15 +111,16 @@ def reset(memory):
     clear_provider(memory)
 
 
-def advance(memory, talker, text, admin_password="", messages=None):
+def advance(memory, talker, text, messages, admin_password=""):
     """Take one step of setup and return the reply to send.
 
-    Called for every message until ``is_configured`` is true.
+    ``messages`` comes from ``load_locale``; there is no default, because the
+    device has no words of its own.
     """
     text = (text or "").strip()
 
     if not list_admin_talkers(memory):
-        return _claim(memory, talker, text, admin_password, messages)
+        return _claim(memory, talker, text, messages, admin_password)
 
     if not is_admin_talker(memory, talker):
         return say(messages, "setup_in_progress")
@@ -118,7 +136,7 @@ def advance(memory, talker, text, admin_password="", messages=None):
     return say(messages, "already_configured")
 
 
-def _claim(memory, talker, text, admin_password, messages):
+def _claim(memory, talker, text, messages, admin_password):
     """Nobody administers this device yet."""
     if admin_password and text != admin_password:
         return say(messages, "ask_password")

@@ -41,11 +41,14 @@ class Bot(Interface):
         # Optional. Without it, the first person to reach the device can claim
         # it - fine on a private channel, less so on a public one.
         self.admin_password = conf.get("admin_password", "")
-        # What a bot says before an administrator gives it a personality.
-        self.unconfigured_prompt = conf.get("unconfigured_prompt", "")
-        # Every line the device says for itself, rather than through an LLM:
-        # the setup exchange plus the greeting. See setup.MESSAGES.
-        self.messages = conf.get("messages", {})
+        # Everything the device says for itself comes from a locale file, so a
+        # device can be built for a language botforge does not ship. Individual
+        # lines can still be overridden inline in config.
+        locale = setup.load_locale(conf.get("language", setup.DEFAULT_LANGUAGE))
+        self.unconfigured_prompt = conf.get(
+            "unconfigured_prompt", locale["unconfigured_prompt"]
+        )
+        self.messages = {**locale["messages"], **conf.get("messages", {})}
 
         # One file holds everything botforge owns: config, tools and history.
         self.database = os.path.abspath(conf.get("database", DEFAULT_DATABASE))
@@ -55,7 +58,7 @@ class Bot(Interface):
     def setup_step(self, talker, text):
         """One turn of the pre-LLM setup exchange."""
         return setup.advance(
-            self.memory, talker, text, self.admin_password, self.messages
+            self.memory, talker, text, self.messages, self.admin_password
         )
 
     def apply_provider_key(self):

@@ -13,7 +13,7 @@ A chatbot platform where bot personality and capabilities are entirely database 
 ## Getting started
 
 1. Install: `pip install -e .` (depends on `zoozl>=0.2.9` and `openai-agents`).
-2. Configure: copy [example.toml](example.toml) and edit it. Everything is optional — the example lists every setting with its default.
+2. Configure: copy [example.toml](example.toml) and edit it. Everything is optional — the example lists every setting with its default. For another language, copy `botforge/locales/en.toml`, translate it, and point `language` at it.
 3. Run: `python -m zoozl my_bot.toml` (the config needs `extensions = ["botforge.plugin"]`)
 4. Chat: the device has no LLM yet, so it asks for a provider (`openai`, `claude`, `gemini`) and that provider's API key. The model is the provider's default and can be changed later just by asking.
 
@@ -29,7 +29,9 @@ botforge/
     ├── setup.py            # First-boot configuration, before any LLM      ─┘
     ├── openai_tools.py     # ToolSpec → agents.FunctionTool adapter        ─┐
     ├── agent.py            # build_agent(): assembles instructions + tools  ├─ framework
-    └── plugin.py           # Bot(Interface): zoozl wiring, the agent loop  ─┘
+    ├── plugin.py           # Bot(Interface): zoozl wiring, the agent loop  ─┘
+    └── locales/
+        └── en.toml         # Everything the device says; copy to translate
 ```
 
 Only the bottom three touch the agent framework, so swapping it means rewriting one

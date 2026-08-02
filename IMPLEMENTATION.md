@@ -35,7 +35,7 @@ botforge is a minimal chatbot platform where bot personality and capabilities ar
 4. **botforge/agent.py** — Agent assembly
    - `build_agent(memory, name?, unconfigured_prompt?)`: Loads the stored `Provider`, plus BotConfig and DynamicTool rows, falls back to the generic unconfigured prompt if none exist, assembles an Agent with bootstrap + dynamic tools
    - `resolve_model(provider, model)`: OpenAI uses the SDK's native path; any other provider routes through LiteLLM, handed the stored key
-   - The text a bot uses before it has a personality is not in code — it comes from `unconfigured_prompt` in config (see `example.toml`). Unset simply leaves the agent without instructions.
+   - The text a bot uses before it has a personality is not in code — it comes from the locale file, or from `unconfigured_prompt` in config to override it.
 
 5. **botforge/plugin.py** — zoozl Interface
    - `Bot` class: The zoozl-compatible chatbot plugin
@@ -47,7 +47,7 @@ botforge is a minimal chatbot platform where bot personality and capabilities ar
    - A device ships with no administrator, provider or key, so there is nothing to run an agent with. `advance(memory, talker, text)` drives a plain state machine: pick a provider from `PROVIDERS`, then supply its key. The model is that provider's default and is never asked for — `set_provider` changes it later.
    - Each step is derived from what is in the database, not from conversation state, so a restart or dropped connection resumes where it left off.
    - Imports no LLM SDK, which is the whole point.
-   - Every line it says lives in `MESSAGES` and can be replaced from `[botforge.messages]`; `say()` falls back to the built-in if an override uses an unknown placeholder.
+   - It contains no English. Every line comes from a locale file (`locales/en.toml`), selected by `language` in config, so a device can be built for a language botforge does not ship. `REQUIRED_MESSAGES` names the lines a locale must define; a missing one is reported when the device starts.
 
 7. **botforge/session.py** — Conversation history
    - `WindowedSession`: SDK-free SQLite conversation store that replays only the last N items to the LLM (default 10), avoiding prompt bloat while keeping full history persisted
@@ -76,6 +76,14 @@ Bootstrap tools are the only hardcoded Python functions in the system. They're a
 2. **Admin calls `set_instructions(text, model?)`** — updates the singleton `BotConfig` row. On the next message, the agent will use the new instructions.
 3. **Admin calls `define_tool(name, description, source_code)`** — `exec`s the source to validate it defines `Params` (a pydantic model) and `handler` (an async function). If valid, stores it in the `DynamicTool` table. On the next message, the new tool appears in the agent's tool list.
 4. **Subsequent messages** — the agent rebuilds from BotConfig + all enabled DynamicTools, no restart needed.
+
+### Language
+
+Nothing the device says for itself is in the Python source. `botforge/locales/en.toml`
+holds the first-boot exchange, the connect greeting and the unconfigured prompt;
+`language` in config picks a bundled locale by name or a TOML file by path, so a
+device can ship speaking anything. `[botforge.messages]` still overrides
+individual lines on top of whichever locale is loaded.
 
 ### First boot
 

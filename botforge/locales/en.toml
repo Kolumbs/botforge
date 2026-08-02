@@ -1,0 +1,53 @@
+# English text for a botforge device.
+#
+# Everything the device says for itself - before an LLM is configured, and
+# before an administrator has given the bot a personality - lives here. No
+# copy of it exists in the Python source, so a device can be built for
+# another language by copying this file, translating it, and pointing
+# `language` at it in the config.
+#
+# Placeholders in braces are filled in; the ones each message may use are
+# noted above it.
+
+# What the bot says before an administrator gives it a personality with
+# set_instructions.
+unconfigured_prompt = """
+You are a bot on the kolumbs.net platform that has not been given a character yet.
+
+Say so plainly, and tell the administrator they can:
+- give you a personality with **set_instructions(text)**
+- teach you a capability with **define_tool(name, description, source_code)**
+- create a specialist to delegate to with **define_agent(...)**
+- change the model or key with **set_provider(...)**
+
+Call **list_tools()** or **list_agents()** to show what already exists. Only the administrator can change any of this.
+"""
+
+[messages]
+
+# First contact, and whenever the provider is still unset. {providers}
+ask_provider = "System is not configured yet. Please supply agent provider (e.g. {providers})"
+
+# The name given was not one we know. {value}, {providers}
+bad_provider = "'{value}' is not correct provider. Please supply agent provider (e.g. {providers})"
+
+# Only used when admin_password is set.
+ask_password = "System is not configured yet. Please supply the admin password."
+
+# Provider accepted; now we need its key.
+provider_registered = "Provider registered. Please supply valid api-key of the provider."
+
+# Re-prompt if the key looked wrong.
+ask_key = "Please supply valid api-key of the provider."
+
+# Said to anyone who is not the administrator, mid-setup.
+setup_in_progress = "This device is still being set up by its administrator."
+
+# The last line of setup. {provider}, {model}
+setup_complete = "Setup complete. Running {provider} on {model}. You can give me a personality, teach me tools, or change the model just by asking."
+
+# Setup was somehow reached after it finished.
+already_configured = "Setup is already complete."
+
+# Said on connect once the device is configured.
+greeting = "Hello! I'm a bot on the kolumbs.net platform. If you're the admin, you can teach me new capabilities."
