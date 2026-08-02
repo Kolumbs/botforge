@@ -45,7 +45,7 @@ botforge is a minimal chatbot platform where bot personality and capabilities ar
 
 botforge opens its own `membank.LoadMemory` over the file named by `database` in config. It does **not** use zoozl's `root.memory`: that store belongs to zoozl and holds its conversation-routing state, whereas a bot's identity, tools and history are botforge's data with a different lifetime and backup story.
 
-membank is a SQLite dataclass ORM, so each `@dataclass` becomes a table — named by **lowercasing the class name with no separator** (`AdminGrant` → `admingrant`). Conversation history is log-shaped rather than dataclass-shaped, so `session.py` manages its own table in the same file:
+membank is a SQLite dataclass ORM, so each `@dataclass` becomes a table. Conversation history is log-shaped rather than dataclass-shaped, so `session.py` manages its own table in the same file:
 
 ```sql
 CREATE TABLE botconfig   (id INTEGER PRIMARY KEY, instructions TEXT, model TEXT, updated_at TEXT);
