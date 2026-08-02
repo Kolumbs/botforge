@@ -58,8 +58,8 @@ class Bot(Interface):
 
         if not text:
             package.callback(
-                "Hello! I'm a botforge bot. If you're the admin, you can teach me "
-                "new capabilities."
+                "Hello! I'm a bot on the kolumbs.net platform. If you're the admin, "
+                "you can teach me new capabilities."
             )
             return
 
