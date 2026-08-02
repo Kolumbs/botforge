@@ -42,7 +42,15 @@ so return a string.
 # it, so this name is the entry point rather than just a default.
 ROOT_AGENT = "main"
 
-DEFAULT_PROVIDER = "openai"
+# The providers an administrator can pick during setup. The key is what they
+# type; litellm_prefix is empty for the one the SDK talks to natively, and
+# otherwise names the provider to LiteLLM. Each brings a default model, so
+# setup never has to ask for one - it can be changed later with set_provider.
+PROVIDERS = {
+    "openai": {"model": "gpt-4o-mini", "litellm_prefix": ""},
+    "claude": {"model": "claude-sonnet-4-5", "litellm_prefix": "anthropic"},
+    "gemini": {"model": "gemini-2.0-flash", "litellm_prefix": "gemini"},
+}
 
 
 @dataclasses.dataclass
@@ -62,7 +70,7 @@ class Provider:
     """The LLM behind every agent. Filled in by first-boot setup, not by config."""
 
     id: int = dataclasses.field(default=1, metadata={"key": True})
-    name: str = DEFAULT_PROVIDER  # openai, anthropic, gemini, ...
+    name: str = ""  # one of PROVIDERS; empty until setup has run
     api_key: str = ""
     model: str = ""
     updated_at: str = ""

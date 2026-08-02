@@ -24,7 +24,7 @@ A chatbot platform where bot personality and capabilities are entirely database 
    workspace_token = "..."
    ```
 3. Run: `python -m zoozl my_bot.toml` (the config needs `extensions = ["botforge.plugin"]`)
-4. Chat: the device has no LLM yet, so it walks you through claiming it and supplying a provider, key and model — then you can start teaching it.
+4. Chat: the device has no LLM yet, so it asks for a provider (`openai`, `claude`, `gemini`) and that provider's API key. The model is the provider's default and can be changed later just by asking.
 
 ## Project layout
 

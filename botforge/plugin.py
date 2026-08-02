@@ -20,7 +20,7 @@ from zoozl.chatbot import Interface
 
 from . import setup
 from .agent import build_agent
-from .dynamic_tools import DEFAULT_PROVIDER, get_provider, is_admin_talker
+from .dynamic_tools import PROVIDERS, get_provider, is_admin_talker
 from .session import WindowedSession
 
 
@@ -50,8 +50,8 @@ class Bot(Interface):
     def apply_provider_key(self):
         """Hand the SDK the stored key, once per change rather than per turn."""
         provider = get_provider(self.memory)
-        if provider.name != DEFAULT_PROVIDER:
-            return  # other providers get the key when their model is built
+        if PROVIDERS.get(provider.name, {}).get("litellm_prefix", provider.name):
+            return  # LiteLLM providers get the key when their model is built
         if provider.api_key != self.applied_key:
             set_default_openai_key(provider.api_key)
             self.applied_key = provider.api_key

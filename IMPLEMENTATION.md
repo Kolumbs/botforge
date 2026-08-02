@@ -44,7 +44,7 @@ botforge is a minimal chatbot platform where bot personality and capabilities ar
    - Aliases read from config (`conf["botforge"]["aliases"]`), not hardcoded
 
 6. **botforge/setup.py** — First-boot setup, with no LLM
-   - A device ships with no administrator, key or model, so there is nothing to run an agent with. `advance(memory, talker, text)` drives a plain state machine that claims the device, takes `<provider> <key>`, then a model.
+   - A device ships with no administrator, provider or key, so there is nothing to run an agent with. `advance(memory, talker, text)` drives a plain state machine: pick a provider from `PROVIDERS`, then supply its key. The model is that provider's default and is never asked for — `set_provider` changes it later.
    - Each step is derived from what is in the database, not from conversation state, so a restart or dropped connection resumes where it left off.
    - Imports no LLM SDK, which is the whole point.
 
@@ -78,10 +78,26 @@ Bootstrap tools are the only hardcoded Python functions in the system. They're a
 
 ### First boot
 
-Nothing about the LLM lives in config. A new device answers its first message
-with a claim prompt, takes the provider and key, then the model, and only then
-can an agent be built. `set_provider` changes it later, and an administrator
-sending `/setup` clears the provider and runs the flow again.
+Nothing about the LLM lives in config:
+
+```
+bot: System is not configured yet. Please supply agent provider (e.g. openai, claude, gemini)
+you: siluet
+bot: 'siluet' is not correct provider. Please supply agent provider (e.g. openai, claude, gemini)
+you: openai
+bot: Provider registered. Please supply valid api-key of the provider.
+you: sk-...
+bot: Setup complete. Running openai on gpt-4o-mini.
+```
+
+The model is the provider's default from `PROVIDERS`, so setup never asks for
+one; `set_provider` changes it afterwards through the agent. An administrator
+sending `/setup` clears the provider and runs the flow again, keeping
+administrators.
+
+Providers are `openai` (the SDK's native path), `claude` and `gemini` (both via
+LiteLLM). Adding one is a row in `PROVIDERS`: the name an administrator types,
+its default model, and the prefix LiteLLM knows it by.
 
 ### Delegation
 
