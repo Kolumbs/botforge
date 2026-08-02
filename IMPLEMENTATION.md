@@ -33,9 +33,9 @@ botforge is a minimal chatbot platform where bot personality and capabilities ar
    - Swapping agent frameworks means writing a sibling of this file; nothing else changes
 
 4. **botforge/agent.py** — Agent assembly
-   - `build_agent(memory)`: Loads the stored `Provider`, plus BotConfig and DynamicTool rows, falls back to the generic unconfigured prompt if none exist, assembles an Agent with bootstrap + dynamic tools
+   - `build_agent(memory, name?, unconfigured_prompt?)`: Loads the stored `Provider`, plus BotConfig and DynamicTool rows, falls back to the generic unconfigured prompt if none exist, assembles an Agent with bootstrap + dynamic tools
    - `resolve_model(provider, model)`: OpenAI uses the SDK's native path; any other provider routes through LiteLLM, handed the stored key
-   - `UNCONFIGURED_PROMPT`: Generic fallback shown on a fresh database, explains how to use `claim_admin`, `define_tool`, `set_instructions`
+   - `DEFAULT_UNCONFIGURED_PROMPT`: what a bot says before it has a personality; override with `unconfigured_prompt` in config
 
 5. **botforge/plugin.py** — zoozl Interface
    - `Bot` class: The zoozl-compatible chatbot plugin
@@ -151,6 +151,14 @@ aliases = ["bot", "help"]   # which zoozl aliases route here
 history_window = 10         # how many messages to replay per turn
 admin_password = "..."      # if set, required to claim the device; otherwise
                             # the first person to reach it becomes admin
+
+# What a bot says before an administrator has given it a personality. This is
+# the platform's own bootstrapping text - to change a running bot, an
+# administrator uses set_instructions instead.
+unconfigured_prompt = """
+You are a bot that has not been given a character yet. Say so plainly, and
+tell the administrator they can give you a personality with set_instructions.
+"""
 ```
 
 Then run:

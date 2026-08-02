@@ -41,6 +41,8 @@ class Bot(Interface):
         # Optional. Without it, the first person to reach the device can claim
         # it - fine on a private channel, less so on a public one.
         self.admin_password = conf.get("admin_password", "")
+        # What a bot says before an administrator gives it a personality.
+        self.unconfigured_prompt = conf.get("unconfigured_prompt", "")
 
         # One file holds everything botforge owns: config, tools and history.
         self.database = os.path.abspath(conf.get("database", DEFAULT_DATABASE))
@@ -87,7 +89,7 @@ class Bot(Interface):
 
         # Rebuilt each turn so tool and instruction edits take effect without
         # restarting the process.
-        self.agent = build_agent(self.memory)
+        self.agent = build_agent(self.memory, unconfigured_prompt=self.unconfigured_prompt)
 
         result = await Runner.run(
             self.agent,

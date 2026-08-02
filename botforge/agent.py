@@ -17,10 +17,10 @@ from .openai_tools import to_function_tools
 log = logging.getLogger(__name__)
 
 
-# Shown until an administrator gives this bot a personality with
-# set_instructions. Setup has already run by the time an agent exists, so the
-# administrator and the LLM are in place and only the character is missing.
-UNCONFIGURED_PROMPT = (
+# Fallback for a bot nobody has given a personality to yet. Override it with
+# `unconfigured_prompt` in the [botforge] config section; an administrator who
+# wants to change a running bot uses set_instructions instead.
+DEFAULT_UNCONFIGURED_PROMPT = (
     "You are a bot on the kolumbs.net platform that has not been given a "
     "character yet.\n\n"
     "Say so plainly, and tell the administrator they can:\n"
@@ -52,7 +52,7 @@ def resolve_model(provider, model):
     return LitellmModel(model=f"{prefix}/{model}", api_key=provider.api_key)
 
 
-def build_agent(memory, name=ROOT_AGENT):
+def build_agent(memory, name=ROOT_AGENT, unconfigured_prompt=""):
     """Assemble an Agent from stored configuration and tools.
 
     Everything comes from the database, including which LLM to use - see
@@ -62,19 +62,22 @@ def build_agent(memory, name=ROOT_AGENT):
 
     :param memory: a membank.LoadMemory (SQLite dataclass store).
     :param name: which agent to build; defaults to the one people talk to.
+    :param unconfigured_prompt: what a bot with no stored personality says.
+        Empty falls back to DEFAULT_UNCONFIGURED_PROMPT.
     :return: an agents.Agent ready to run.
     """
     provider = get_provider(memory)
     if not provider or not provider.api_key:
         raise RuntimeError("No LLM configured yet - run first-boot setup")
-    return _build(memory, name, provider, frozenset())
+    fallback = unconfigured_prompt or DEFAULT_UNCONFIGURED_PROMPT
+    return _build(memory, name, provider, fallback, frozenset())
 
 
-def _build(memory, name, provider, building):
+def _build(memory, name, provider, fallback, building):
     """Build one agent, recursing into whatever delegates from it."""
     config = memory.get.botconfig(name=name)
 
-    instructions = UNCONFIGURED_PROMPT if name == ROOT_AGENT else ""
+    instructions = fallback if name == ROOT_AGENT else ""
     model = provider.model
     if config:
         instructions = config.instructions or config.description or instructions
@@ -99,7 +102,7 @@ def _build(memory, name, provider, building):
             )
             continue
         tools.append(
-            _build(memory, sub.name, provider, building).as_tool(
+            _build(memory, sub.name, provider, fallback, building).as_tool(
                 tool_name=sub.name,
                 tool_description=sub.description or f"Delegate to the {sub.name} agent.",
             )
