@@ -12,7 +12,7 @@ requires-python = ">=3.10"
 dependencies = [
     "membank>=0.5.6",
     "zoozl>=0.2.9",
-    "openai-agents>=0.6,<0.7",
+    "openai-agents[litellm]>=0.6,<0.7",
     "pydantic>=2.0",
 ]
 
@@ -20,7 +20,6 @@ dependencies = [
 botforge = ["locales/*.toml"]
 
 [project.optional-dependencies]
-litellm = ["openai-agents[litellm]"]
 dev = [
     "pytest>=7.0",
     "pytest-asyncio>=0.21",

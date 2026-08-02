@@ -3,6 +3,7 @@
 import logging
 
 from agents import Agent
+from agents.extensions.models.litellm_model import LitellmModel
 
 from .dynamic_tools import (
     PROVIDERS,
@@ -21,19 +22,11 @@ def resolve_model(provider, model):
     """Return something an Agent can use as its model.
 
     One provider is the SDK's native path and takes a plain model name. The
-    rest go through LiteLLM, which the SDK ships as an optional extra and which
-    is handed the stored key directly.
+    rest go through LiteLLM, handed the stored key directly.
     """
     prefix = PROVIDERS.get(provider.name, {}).get("litellm_prefix", provider.name)
     if not prefix:
         return model
-    try:
-        from agents.extensions.models.litellm_model import LitellmModel
-    except ImportError:
-        raise RuntimeError(
-            f"Provider {provider.name!r} needs LiteLLM. "
-            "Install it with: pip install 'botforge[litellm]'"
-        ) from None
     return LitellmModel(model=f"{prefix}/{model}", api_key=provider.api_key)
 
 

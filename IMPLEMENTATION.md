@@ -34,7 +34,7 @@ botforge is a minimal chatbot platform where bot personality and capabilities ar
 
 4. **botforge/agent.py** — Agent assembly
    - `build_agent(memory, name?, unconfigured_prompt?)`: Loads the stored `Provider`, plus BotConfig and DynamicTool rows, falls back to the generic unconfigured prompt if none exist, assembles an Agent with bootstrap + dynamic tools
-   - `resolve_model(provider, model)`: OpenAI uses the SDK's native path; any other provider routes through LiteLLM, handed the stored key
+   - `resolve_model(provider, model)`: OpenAI uses the SDK's native path; any other provider routes through LiteLLM, handed the stored key. LiteLLM is a hard dependency, so a missing install fails at import rather than at the first message
    - The text a bot uses before it has a personality is not in code — it comes from the locale file, or from `unconfigured_prompt` in config to override it.
 
 5. **botforge/plugin.py** — zoozl Interface
@@ -105,8 +105,9 @@ sending `/setup` clears the provider and runs the flow again, keeping
 administrators.
 
 Providers are `openai` (the SDK's native path), `claude` and `gemini` (both via
-LiteLLM). Adding one is a row in `PROVIDERS`: the name an administrator types,
-its default model, and the prefix LiteLLM knows it by.
+LiteLLM, which is a hard dependency). Adding one is a row in `PROVIDERS`: the
+name an administrator types, its default model, and the prefix LiteLLM knows it
+by.
 
 ### Delegation
 
