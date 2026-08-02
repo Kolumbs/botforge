@@ -10,6 +10,7 @@ authors = [{name = "Juris Kaminskis", email = "juris.kaminskis@gmail.com"}]
 requires-python = ">=3.10"
 
 dependencies = [
+    "membank>=0.5.6",
     "zoozl>=0.2.9",
     "openai-agents>=0.6,<0.7",
     "pydantic>=2.0",

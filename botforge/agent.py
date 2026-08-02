@@ -41,15 +41,12 @@ def build_agent(conf, memory, model=None):
     instructions = UNCONFIGURED_PROMPT
     actual_model = model or conf.get("model", "gpt-4o-mini")
 
-    try:
-        bot_config = memory.get.bot_config(id=1)
-        if bot_config:
-            if bot_config.instructions:
-                instructions = bot_config.instructions
-            if bot_config.model:
-                actual_model = bot_config.model
-    except Exception:
-        pass  # Use defaults if BotConfig doesn't exist yet
+    bot_config = memory.get.botconfig(id=1)
+    if bot_config:
+        if bot_config.instructions:
+            instructions = bot_config.instructions
+        if bot_config.model:
+            actual_model = bot_config.model
 
     # Bootstrap tools are always present; dynamic tools come from the database.
     # Both are neutral ToolSpecs, so a single adapter call binds the lot.

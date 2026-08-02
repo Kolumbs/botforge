@@ -32,7 +32,7 @@ botforge is a minimal chatbot platform where bot personality and capabilities ar
 
 5. **botforge/plugin.py** — zoozl Interface
    - `Bot` class: The zoozl-compatible chatbot plugin
-   - `load(root)`: Reads config, stores `root` (for `root.memory`), builds initial agent
+   - `load(root)`: Reads config, opens botforge's own membank database, builds initial agent
    - `consume(package)`: Per message, rebuilds agent (to pick up instruction/tool changes), runs `Runner.run(...)`, sends reply
    - Aliases read from config (`conf["botforge"]["aliases"]`), not hardcoded
 
@@ -43,19 +43,22 @@ botforge is a minimal chatbot platform where bot personality and capabilities ar
 
 ### Persistence Model
 
-Bot configuration is persisted via `root.memory`, a `membank.LoadMemory` instance that zoozl creates automatically. membank is a SQLite dataclass ORM, so every `@dataclass` in botforge (BotConfig, AdminGrant, DynamicTool) becomes a table. Conversation history is shaped like an append-only log rather than a dataclass, so `session.py` manages its own table — in the same SQLite file by default, so there is still only one database per bot:
+botforge opens its own `membank.LoadMemory` over the file named by `database` in config. It does **not** use zoozl's `root.memory`: that store belongs to zoozl and holds its conversation-routing state, whereas a bot's identity, tools and history are botforge's data with a different lifetime and backup story.
+
+membank is a SQLite dataclass ORM, so each `@dataclass` becomes a table — named by **lowercasing the class name with no separator** (`AdminGrant` → `admingrant`). Conversation history is log-shaped rather than dataclass-shaped, so `session.py` manages its own table in the same file:
 
 ```sql
-CREATE TABLE bot_config (id INTEGER PRIMARY KEY, instructions TEXT, model TEXT, updated_at TEXT);
-CREATE TABLE admin_grant (talker TEXT PRIMARY KEY, granted_at TEXT);
-CREATE TABLE dynamic_tool (name TEXT PRIMARY KEY, description TEXT, source_code TEXT, enabled BOOLEAN, created_by TEXT, updated_at TEXT, contract_version INTEGER);
+CREATE TABLE botconfig   (id INTEGER PRIMARY KEY, instructions TEXT, model TEXT, updated_at TEXT);
+CREATE TABLE admingrant  (talker TEXT PRIMARY KEY, granted_at TEXT);
+CREATE TABLE dynamictool (name TEXT PRIMARY KEY, description TEXT, source_code TEXT, enabled BOOLEAN, created_by TEXT, updated_at TEXT, contract_version INTEGER);
+CREATE TABLE conversation_items (id INTEGER PRIMARY KEY AUTOINCREMENT, session_id TEXT, payload TEXT);
 ```
 
 ### Bootstrap Tools
 
 Bootstrap tools are the only hardcoded Python functions in the system. They're always registered, and they're the mechanism that allows everything else to happen (a DB-defined tool can't be the thing that first writes to the DB):
 
-1. **First user calls `claim_admin()`** — they're granted if the `AdminGrant` table is empty, otherwise they're told someone already claimed it.
+1. **First user calls `claim_admin()`** — they're granted if the `admingrant` table is empty, otherwise they're told someone already claimed it.
 2. **Admin calls `set_instructions(text, model?)`** — updates the singleton `BotConfig` row. On the next message, the agent will use the new instructions.
 3. **Admin calls `define_tool(name, description, source_code)`** — `exec`s the source to validate it defines `Params` (a pydantic model) and `handler` (an async function). If valid, stores it in the `DynamicTool` table. On the next message, the new tool appears in the agent's tool list.
 4. **Subsequent messages** — the agent rebuilds from BotConfig + all enabled DynamicTools, no restart needed.
@@ -97,7 +100,7 @@ Create a TOML file (e.g., `my_bot.toml`):
 [botforge]
 api_key = "sk-..."          # Required: OpenAI API key
 aliases = ["bot", "help"]   # Optional: which aliases route to this bot
-session_database = "my_bot_sessions.db"  # Optional: defaults to zoozl's own database file
+database = "my_bot.db"      # Optional: botforge's own database (default botforge.db)
 history_window = 10         # Optional: how many messages to replay per turn
 
 [slack]
@@ -114,11 +117,14 @@ Then run:
 python -m zoozl my_bot.toml
 ```
 
-zoozl imports each module named in `extensions`, discovers the `Interface` subclass in it, creates/opens the SQLite database, and starts the server. Point it at the plugin module, not the package:
+zoozl imports each module named in `extensions`, discovers the `Interface` subclass in it, and starts the server. Point it at the plugin module, not the package:
 
 ```toml
 extensions = ["botforge.plugin"]
-memory_path = "sqlite://my_bot.db"
+# memory_path is zoozl's own store for conversation routing. It is separate
+# from botforge's `database` above, and optional - unset means zoozl keeps
+# that state in memory only.
+memory_path = "sqlite://zoozl_routing.db"
 ```
 
 Connect via Slack, WebSocket, or email depending on config.

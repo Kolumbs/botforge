@@ -1,6 +1,7 @@
 """Dynamic tool definitions, admin grants, and the bot configuration.
 
-All of these are persisted via root.memory (a membank SQLite dataclass store).
+Persisted in botforge's own membank store, opened by the plugin - not in
+zoozl's root.memory, which holds zoozl's conversation-routing state.
 """
 
 import dataclasses
@@ -111,33 +112,31 @@ class DisableToolParams(AdminAuthBase):
     name: str = pydantic.Field(description="The name of the tool to disable.")
 
 
-# Helper functions for admin authorization
-
+# membank derives table names by lowercasing the dataclass name, with no word
+# separator: AdminGrant -> admingrant, BotConfig -> botconfig, DynamicTool ->
+# dynamictool. Querying a name that does not exist returns None (or [] for the
+# list form) rather than raising, so a wrong name fails silently - keep these in
+# step with the dataclasses above.
+ADMIN_GRANTS = "admingrant"
+BOT_CONFIGS = "botconfig"
+DYNAMIC_TOOLS = "dynamictool"
 
 
 def _is_admin_talker(memory, talker):
     """Check if a talker has admin privileges."""
     if not talker:
         return False
-    try:
-        grant = memory.get.admin_grant(talker=talker)
-        return bool(grant)
-    except Exception:
-        return False
+    return bool(memory.get.admingrant(talker=talker))
 
 
 def _grant_admin(memory, talker):
     """Grant admin privileges to a talker, persisting the grant."""
     if not talker:
         return False
-    try:
-        grant = memory.get.admin_grant(talker=talker)
-        if not grant:
-            now = datetime.now(timezone.utc).isoformat()
-            memory.put(AdminGrant(talker=talker, granted_at=now))
-        return True
-    except Exception:
-        return False
+    if not memory.get.admingrant(talker=talker):
+        now = datetime.now(timezone.utc).isoformat()
+        memory.put(AdminGrant(talker=talker, granted_at=now))
+    return True
 
 
 def load_tool_source(source_code):
@@ -196,12 +195,7 @@ async def claim_admin(ctx: dict, params: AdminAuthBase) -> str:
     if not memory or not talker:
         return "Internal error: no memory or talker context."
 
-    try:
-        existing_grants = list(memory.get_filter(AdminGrant, filter=None))
-    except Exception:
-        existing_grants = []
-
-    if existing_grants:
+    if list(memory.get(ADMIN_GRANTS)):
         return (
             "Admin has already been claimed. If you need to grant admin to another session, "
             "ask an existing admin to call grant_admin."
@@ -237,10 +231,7 @@ async def set_instructions(ctx: dict, params: SetInstructionsParams) -> str:
 
     try:
         now = datetime.now(timezone.utc).isoformat()
-        try:
-            config = memory.get.bot_config(id=1)
-        except Exception:
-            config = None
+        config = memory.get.botconfig(id=1)
 
         if config:
             config.instructions = params.text
@@ -297,10 +288,7 @@ async def list_tools(ctx: dict, params: AdminAuthBase) -> str:
     """List all defined tools."""
     memory = ctx.get("memory")
 
-    try:
-        tools = list(memory.get_filter(DynamicTool, filter=None))
-    except Exception:
-        tools = []
+    tools = list(memory.get(DYNAMIC_TOOLS))
 
     if not tools:
         return "No tools defined yet."
@@ -322,11 +310,7 @@ async def disable_tool(ctx: dict, params: DisableToolParams) -> str:
         return "You must be admin to disable tools. Call claim_admin first."
 
     try:
-        try:
-            tool = memory.get.dynamic_tool(name=params.name)
-        except Exception:
-            tool = None
-
+        tool = memory.get.dynamictool(name=params.name)
         if not tool:
             return f"Tool '{params.name}' not found."
         tool.enabled = False
@@ -388,18 +372,7 @@ def build_dynamic_tool_specs(memory):
     Returns framework-neutral specs; binding them to an agent framework is the
     caller's job (see ``agent.build_agent``).
     """
-    try:
-        # Try to get all DynamicTool rows — membank pattern may vary
-        try:
-            tools = list(memory.get_filter(DynamicTool, filter=None))
-        except Exception:
-            try:
-                tools = list(memory.get("dynamic_tool"))
-            except Exception:
-                tools = []
-        tools = [t for t in tools if t.enabled]
-    except Exception:
-        tools = []
+    tools = [tool for tool in memory.get(DYNAMIC_TOOLS) if tool.enabled]
 
     specs = []
     for tool in tools:

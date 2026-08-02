@@ -17,8 +17,8 @@ An admin can teach the bot new capabilities, change its personality, and fix bug
 
 1. **zoozl** (external dependency) — Transport and message routing
    - Handles Slack, WebSocket, email, WhatsApp
-   - Provides `root.memory` — a generic SQLite dataclass store that all plugins share
    - No changes to zoozl; botforge uses it as-is
+   - botforge does not use its `root.memory`; it opens its own database
 
 2. **botforge** (new repo) — The bot engine
    - **tools.py** — `ToolSpec`, the framework-neutral tool descriptor (no SDK import)
@@ -110,7 +110,7 @@ that made the tool/session layers framework-independent.
 [botforge]
 api_key = "sk-..."
 aliases = ["bot", "help"]
-session_database = "profile_sessions.db"
+database = "profile_bot.db"
 
 [slack]
 signing_secret = "..."
@@ -191,7 +191,7 @@ and chat the bot into existence following QUICK_START.md.
 | **In-process tool reload** | No process restart needed for pure-Python tool changes. Supervisor phase can handle pip installs later. |
 | **No sandboxing for tool code** | Admin = code execution. You own the server and the bot. Intentional trade-off: simplicity over isolation. |
 | **Live source code in DB** | Not bytecode or compiled blobs. Stays human-readable, editable by chat. |
-| **Reuse zoozl's root.memory hook** | Don't add a new DB; use what zoozl already exposes. Keeps attack surface isolated from transport layer. |
+| **botforge owns its own database** | zoozl's `root.memory` holds zoozl's conversation-routing state. A bot's tools, personality and grants are the product — different lifetime, different backup story — so botforge opens its own file rather than writing into the transport layer's. |
 | **Separate deployments per bot** | Not a monolith. Each bot has its own process, config, database. Blast radius contained. |
 
 ## Testing

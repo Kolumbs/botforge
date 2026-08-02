@@ -18,7 +18,7 @@ A chatbot platform where bot personality and capabilities are entirely database 
    [botforge]
    api_key = "your-openai-api-key"
    aliases = ["bot", "help", "greet"]
-   session_database = "my_bot_sessions.db"
+   database = "my_bot.db"          # botforge's own database
    
    [slack]
    signing_secret = "..."
@@ -57,7 +57,7 @@ Every bot instance ships with these built-in tools:
 
 ## How it works
 
-1. **Persistence**: `root.memory` (a zoozl feature, powered by `membank`) is a SQLite dataclass ORM shared across all plugins. BotConfig, DynamicTool, and AdminGrant rows live there.
+1. **Persistence**: botforge opens its own SQLite database (`database` in config). BotConfig, DynamicTool and AdminGrant are membank dataclass tables; conversation history is an append-only table in the same file. zoozl's `root.memory` is left alone — that holds zoozl's own conversation-routing state.
 2. **Bootstrap tools** (hardcoded in `agent.py`) are always registered — they're the mechanism that lets everything else exist.
 3. **Dynamic tools** (from DynamicTool rows) are loaded each turn and mixed into the agent's tool list. No process restart needed for pure-Python changes.
 4. **Admin gate**: Every administrative tool checks if the current session's `talker` (a zoozl cookie-based session ID) is in the AdminGrant table. The first person to call `claim_admin` is granted forever.
