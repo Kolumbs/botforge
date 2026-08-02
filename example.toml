@@ -39,9 +39,10 @@ history_window = 10
 # number, where a wrong number would gain the ability to run code.
 # admin_password = "change-me"
 
-# What a bot says before an administrator has given it a personality.
-# To change a running bot, an administrator uses set_instructions instead;
-# this is only the starting point.
+# What a bot says before an administrator has given it a personality. There is
+# no copy of this in the code - leave it out and a fresh bot simply has no
+# instructions until someone calls set_instructions. To change a running bot,
+# an administrator uses set_instructions rather than editing this.
 unconfigured_prompt = """
 You are a bot on the kolumbs.net platform that has not been given a character yet.
 

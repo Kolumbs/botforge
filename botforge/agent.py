@@ -17,21 +17,6 @@ from .openai_tools import to_function_tools
 log = logging.getLogger(__name__)
 
 
-# Fallback for a bot nobody has given a personality to yet. Override it with
-# `unconfigured_prompt` in the [botforge] config section; an administrator who
-# wants to change a running bot uses set_instructions instead.
-DEFAULT_UNCONFIGURED_PROMPT = (
-    "You are a bot on the kolumbs.net platform that has not been given a "
-    "character yet.\n\n"
-    "Say so plainly, and tell the administrator they can:\n"
-    "- give you a personality with **set_instructions(text)**\n"
-    "- teach you a capability with **define_tool(name, description, source_code)**\n"
-    "- create a specialist to delegate to with **define_agent(...)**\n"
-    "- change the model or key with **set_provider(...)**\n\n"
-    "Call **list_tools()** or **list_agents()** to show what already exists. "
-    "Only the administrator can change any of this."
-)
-
 def resolve_model(provider, model):
     """Return something an Agent can use as its model.
 
@@ -62,22 +47,22 @@ def build_agent(memory, name=ROOT_AGENT, unconfigured_prompt=""):
 
     :param memory: a membank.LoadMemory (SQLite dataclass store).
     :param name: which agent to build; defaults to the one people talk to.
-    :param unconfigured_prompt: what a bot with no stored personality says.
-        Empty falls back to DEFAULT_UNCONFIGURED_PROMPT.
+    :param unconfigured_prompt: what the root agent says before an
+        administrator has given it a personality, from the config of the same
+        name. Empty simply leaves it without instructions, as sub-agents are.
     :return: an agents.Agent ready to run.
     """
     provider = get_provider(memory)
     if not provider or not provider.api_key:
         raise RuntimeError("No LLM configured yet - run first-boot setup")
-    fallback = unconfigured_prompt or DEFAULT_UNCONFIGURED_PROMPT
-    return _build(memory, name, provider, fallback, frozenset())
+    return _build(memory, name, provider, unconfigured_prompt, frozenset())
 
 
-def _build(memory, name, provider, fallback, building):
+def _build(memory, name, provider, unconfigured, building):
     """Build one agent, recursing into whatever delegates from it."""
     config = memory.get.botconfig(name=name)
 
-    instructions = fallback if name == ROOT_AGENT else ""
+    instructions = unconfigured if name == ROOT_AGENT else ""
     model = provider.model
     if config:
         instructions = config.instructions or config.description or instructions
@@ -102,7 +87,7 @@ def _build(memory, name, provider, fallback, building):
             )
             continue
         tools.append(
-            _build(memory, sub.name, provider, fallback, building).as_tool(
+            _build(memory, sub.name, provider, unconfigured, building).as_tool(
                 tool_name=sub.name,
                 tool_description=sub.description or f"Delegate to the {sub.name} agent.",
             )

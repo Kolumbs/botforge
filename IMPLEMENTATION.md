@@ -35,7 +35,7 @@ botforge is a minimal chatbot platform where bot personality and capabilities ar
 4. **botforge/agent.py** — Agent assembly
    - `build_agent(memory, name?, unconfigured_prompt?)`: Loads the stored `Provider`, plus BotConfig and DynamicTool rows, falls back to the generic unconfigured prompt if none exist, assembles an Agent with bootstrap + dynamic tools
    - `resolve_model(provider, model)`: OpenAI uses the SDK's native path; any other provider routes through LiteLLM, handed the stored key
-   - `DEFAULT_UNCONFIGURED_PROMPT`: what a bot says before it has a personality; override with `unconfigured_prompt` in config
+   - The text a bot uses before it has a personality is not in code — it comes from `unconfigured_prompt` in config (see `example.toml`). Unset simply leaves the agent without instructions.
 
 5. **botforge/plugin.py** — zoozl Interface
    - `Bot` class: The zoozl-compatible chatbot plugin
