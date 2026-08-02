@@ -134,10 +134,18 @@ class DefineToolParams(AdminAuthBase):
     )
 
 
-class DisableToolParams(AdminAuthBase):
-    """Parameters for disable_tool."""
+class ToolNameParams(AdminAuthBase):
+    """Parameters for the tool operations that act on one tool by name."""
 
-    name: str = pydantic.Field(description="The name of the tool to disable.")
+    name: str = pydantic.Field(description="The name of the tool.")
+
+
+class DeleteAgentParams(AdminAuthBase):
+    """Parameters for delete_agent."""
+
+    name: str = pydantic.Field(
+        description="Name of the agent to delete, together with every tool assigned to it."
+    )
 
 
 def _is_admin_talker(memory, talker):
@@ -306,15 +314,19 @@ async def list_agents(ctx: dict, params: AdminAuthBase) -> str:
     for tool in memory.get("dynamictool"):
         tools_by_agent.setdefault(tool.agent, []).append(tool.name)
 
+    existing = {config.name for config in configs}
+
     lines = []
     for config in configs:
         owned = ", ".join(sorted(tools_by_agent.get(config.name, []))) or "no tools"
         if config.name == ROOT_AGENT:
             where = "talks to people"
-        elif config.exposed_to:
+        elif config.exposed_to in existing:
             where = f"called by {config.exposed_to}"
+        elif config.exposed_to:
+            where = f"unreachable - '{config.exposed_to}' does not exist"
         else:
-            where = "not reachable - no agent delegates to it"
+            where = "unreachable - no agent delegates to it"
         lines.append(f"  - {config.name} ({where}): {owned}")
 
     return "Agents:\n" + "\n".join(lines)
@@ -367,7 +379,7 @@ async def list_tools(ctx: dict, params: AdminAuthBase) -> str:
     return "\n".join(lines)
 
 
-async def disable_tool(ctx: dict, params: DisableToolParams) -> str:
+async def disable_tool(ctx: dict, params: ToolNameParams) -> str:
     """Disable a tool without deleting it (admin-only)."""
     memory = ctx.get("memory")
     talker = ctx.get("talker")
@@ -381,9 +393,89 @@ async def disable_tool(ctx: dict, params: DisableToolParams) -> str:
             return f"Tool '{params.name}' not found."
         tool.enabled = False
         memory.put(tool)
-        return f"Tool '{params.name}' disabled."
+        return f"Tool '{params.name}' disabled. Use enable_tool to bring it back."
     except Exception as e:
         return f"Failed to disable tool: {e}"
+
+
+async def enable_tool(ctx: dict, params: ToolNameParams) -> str:
+    """Re-enable a disabled tool (admin-only)."""
+    memory = ctx.get("memory")
+    talker = ctx.get("talker")
+
+    if not _is_admin_talker(memory, talker):
+        return "You must be admin to enable tools. Call claim_admin first."
+
+    tool = memory.get.dynamictool(name=params.name)
+    if not tool:
+        return f"Tool '{params.name}' not found."
+    if tool.enabled:
+        return f"Tool '{params.name}' is already enabled."
+    tool.enabled = True
+    memory.put(tool)
+    return f"Tool '{params.name}' enabled."
+
+
+async def delete_tool(ctx: dict, params: ToolNameParams) -> str:
+    """Delete a tool and its stored source for good (admin-only)."""
+    memory = ctx.get("memory")
+    talker = ctx.get("talker")
+
+    if not _is_admin_talker(memory, talker):
+        return "You must be admin to delete tools. Call claim_admin first."
+
+    tool = memory.get.dynamictool(name=params.name)
+    if not tool:
+        return f"Tool '{params.name}' not found."
+
+    memory.delete(tool)
+    return (
+        f"Tool '{params.name}' deleted. Its source is gone - define_tool to recreate "
+        "it, or use disable_tool next time to keep the source."
+    )
+
+
+async def delete_agent(ctx: dict, params: DeleteAgentParams) -> str:
+    """Delete an agent and every tool assigned to it (admin-only)."""
+    memory = ctx.get("memory")
+    talker = ctx.get("talker")
+
+    if not _is_admin_talker(memory, talker):
+        return "You must be admin to delete agents. Call claim_admin first."
+
+    if params.name == ROOT_AGENT:
+        return (
+            f"'{ROOT_AGENT}' is the agent people talk to, so it cannot be deleted. "
+            "Use set_instructions to change what it does."
+        )
+
+    config = memory.get.botconfig(name=params.name)
+    if not config:
+        return f"No agent named '{params.name}'."
+
+    doomed = [tool for tool in memory.get("dynamictool") if tool.agent == params.name]
+    for tool in doomed:
+        memory.delete(tool)
+    memory.delete(config)
+
+    message = f"Agent '{params.name}' deleted"
+    if doomed:
+        names = ", ".join(sorted(tool.name for tool in doomed))
+        message += f", along with its {len(doomed)} tool(s): {names}."
+    else:
+        message += " (it had no tools)."
+
+    # Anything that delegated from the deleted agent survives, but nothing can
+    # reach it any more - say so rather than removing a subtree by surprise.
+    orphans = sorted(
+        c.name for c in memory.get("botconfig") if c.exposed_to == params.name
+    )
+    if orphans:
+        message += (
+            f" {', '.join(orphans)} delegated from it and can no longer be reached; "
+            "re-point with define_agent or delete separately."
+        )
+    return message
 
 
 def build_bootstrap_tool_specs() -> list[ToolSpec]:
@@ -440,9 +532,30 @@ def build_bootstrap_tool_specs() -> list[ToolSpec]:
         ),
         ToolSpec(
             name="disable_tool",
-            description="Disable a tool without deleting it (admin-only).",
-            params=DisableToolParams,
+            description="Disable a tool but keep its source, so it can be enabled again (admin-only).",
+            params=ToolNameParams,
             handler=disable_tool,
+        ),
+        ToolSpec(
+            name="enable_tool",
+            description="Re-enable a previously disabled tool (admin-only).",
+            params=ToolNameParams,
+            handler=enable_tool,
+        ),
+        ToolSpec(
+            name="delete_tool",
+            description="Delete a tool and its source for good (admin-only). Prefer disable_tool to keep the source.",
+            params=ToolNameParams,
+            handler=delete_tool,
+        ),
+        ToolSpec(
+            name="delete_agent",
+            description=(
+                "Delete an agent and every tool assigned to it (admin-only). The agent "
+                "people talk to cannot be deleted."
+            ),
+            params=DeleteAgentParams,
+            handler=delete_agent,
         ),
     ]
 

@@ -52,8 +52,11 @@ Every bot instance ships with these built-in tools:
 - `grant_admin(talker)` — Add another session ID as admin (admin-only).
 - `set_instructions(text, model?)` — Set the bot's system prompt and optionally the model (admin-only).
 - `define_tool(name, description, source_code)` — Add a new tool by providing Python source (admin-only). Source must define a `Params` pydantic model and an async `handler` function.
-- `list_tools()` — Show all defined tools and their status.
-- `disable_tool(name)` — Disable a tool without deleting it (admin-only).
+- `define_agent(name, description, instructions, exposed_to?)` — Create a specialist agent to delegate to (admin-only).
+- `list_tools()` / `list_agents()` — Show what is defined.
+- `disable_tool(name)` / `enable_tool(name)` — Turn a tool off and on, keeping its source (admin-only).
+- `delete_tool(name)` — Remove a tool and its source permanently (admin-only).
+- `delete_agent(name)` — Remove an agent and every tool assigned to it (admin-only).
 
 ## How it works
 

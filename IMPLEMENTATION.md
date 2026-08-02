@@ -18,7 +18,10 @@ botforge is a minimal chatbot platform where bot personality and capabilities ar
      - `set_instructions(text, model?)`: Admin sets bot's personality
      - `define_tool(name, description, source_code, agent?)`: Admin creates new tools
      - `define_agent(name, description, instructions, exposed_to?)`: Admin creates a specialist the caller can delegate to
-     - `list_tools()`, `list_agents()`, `disable_tool(name)`: Management
+     - `list_tools()`, `list_agents()`: Inspection
+     - `disable_tool(name)` / `enable_tool(name)`: Turn a tool off and on, keeping its source
+     - `delete_tool(name)`: Remove a tool and its source for good
+     - `delete_agent(name)`: Remove an agent and every tool assigned to it
 
 2. **botforge/tools.py** — `ToolSpec`: the framework-neutral tool descriptor (name, description, Params pydantic model, handler). Imports no LLM SDK, so the tool layer stays independent of the agent framework.
 
