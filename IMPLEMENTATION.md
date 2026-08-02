@@ -80,7 +80,7 @@ Bootstrap tools are the only hardcoded Python functions in the system. They're a
 ### Language
 
 Nothing the device says for itself is in the Python source. `botforge/locales/en.toml`
-holds the first-boot exchange, the connect greeting and the unconfigured prompt;
+holds the first-boot exchange and the unconfigured prompt;
 `language` in config picks a bundled locale by name or a TOML file by path, so a
 device can ship speaking anything. `[botforge.messages]` still overrides
 individual lines on top of whichever locale is loaded.

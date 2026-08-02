@@ -39,10 +39,11 @@ history_window = 10
 
 # --- language ------------------------------------------------------------
 #
-# Everything the device says for itself - the whole first-boot exchange, the
-# connect greeting, and what a bot says before it has been given a
-# personality - comes from a locale file. Nothing is hardcoded in English,
-# so a device can be built for a language botforge does not ship.
+# Everything the device says for itself - the whole first-boot exchange, and
+# what a bot says before it has been given a personality - comes from a locale
+# file. Nothing is hardcoded in English, so a device can be built for a
+# language botforge does not ship. Once configured, a bot speaks only in its
+# own voice.
 #
 # Either the name of a bundled locale in botforge/locales/, or the path to a
 # TOML file of the same shape. Copy botforge/locales/en.toml, translate it,

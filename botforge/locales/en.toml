@@ -49,5 +49,3 @@ setup_complete = "Setup complete. Running {provider} on {model}. You can give me
 # Setup was somehow reached after it finished.
 already_configured = "Setup is already complete."
 
-# Said on connect once the device is configured.
-greeting = "Hello! I'm a bot on the kolumbs.net platform. If you're the admin, you can teach me new capabilities."

@@ -89,7 +89,8 @@ class Bot(Interface):
             return
 
         if not text:
-            package.callback(setup.say(self.messages, "greeting"))
+            # A connect with nothing said. A configured bot speaks in its own
+            # voice, and there is nothing to answer yet, so say nothing.
             return
 
         self.apply_provider_key()
