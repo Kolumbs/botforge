@@ -27,7 +27,9 @@ botforge is a minimal chatbot platform where bot personality and capabilities ar
    - Swapping agent frameworks means writing a sibling of this file; nothing else changes
 
 4. **botforge/agent.py** — Agent assembly
-   - `build_agent(conf, memory, model?)`: Loads BotConfig and DynamicTool rows, falls back to generic unconfigured prompt if none exist, assembles an Agent with bootstrap + dynamic tools
+   - `build_agent(memory, default_model?)`: Loads BotConfig and DynamicTool rows, falls back to the generic unconfigured prompt if none exist, assembles an Agent with bootstrap + dynamic tools. Handles no credentials.
+   - `configure_provider(conf)`: Applies LLM credentials once at startup
+   - `resolve_model(name)`: Bare name uses the SDK's OpenAI path; `provider/name` routes through LiteLLM
    - `UNCONFIGURED_PROMPT`: Generic fallback shown on a fresh database, explains how to use `claim_admin`, `define_tool`, `set_instructions`
 
 5. **botforge/plugin.py** — zoozl Interface
@@ -98,10 +100,16 @@ Create a TOML file (e.g., `my_bot.toml`):
 
 ```toml
 [botforge]
-api_key = "sk-..."          # Required: OpenAI API key
+api_key = "sk-..."          # OpenAI credentials (see [botforge.env] for others)
+model = "gpt-4o-mini"       # Optional: bare name = OpenAI, "provider/name" = LiteLLM
 aliases = ["bot", "help"]   # Optional: which aliases route to this bot
 database = "my_bot.db"      # Optional: botforge's own database (default botforge.db)
 history_window = 10         # Optional: how many messages to replay per turn
+
+# Any non-OpenAI provider is reached through LiteLLM, which reads credentials
+# from the environment. Needs: pip install 'botforge[litellm]'
+# [botforge.env]
+# ANTHROPIC_API_KEY = "sk-ant-..."
 
 [slack]
 signing_secret = "..."

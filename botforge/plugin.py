@@ -14,10 +14,10 @@ import logging
 import os
 
 import membank
-from agents import Runner, set_default_openai_key
+from agents import Runner
 from zoozl.chatbot import Interface
 
-from .agent import build_agent
+from .agent import DEFAULT_MODEL, build_agent, configure_provider
 from .session import WindowedSession
 
 
@@ -30,18 +30,16 @@ class Bot(Interface):
     """Generic botforge interface: one agent, configuration and tools from database."""
 
     def load(self, root):
-        """Open botforge's database, configure the API key, build the agent."""
+        """Open botforge's database, configure the provider, build the agent."""
         try:
             conf = root.conf["botforge"]
-            api_key = conf["api_key"]
         except KeyError:
-            raise RuntimeError(
-                "botforge requires an 'api_key' in config [botforge] section"
-            ) from None
+            raise RuntimeError("botforge requires a [botforge] config section") from None
 
-        set_default_openai_key(api_key)
+        configure_provider(conf)
 
         self.conf = conf
+        self.default_model = conf.get("model", DEFAULT_MODEL)
         self.history_window = conf.get("history_window", 10)
         self.aliases = set(conf.get("aliases", ["bot", "help", "greet"]))
 
@@ -49,7 +47,7 @@ class Bot(Interface):
         self.database = os.path.abspath(conf.get("database", DEFAULT_DATABASE))
         self.memory = membank.LoadMemory(f"sqlite:///{self.database}")
 
-        self.agent = build_agent(conf, self.memory)
+        self.agent = build_agent(self.memory, self.default_model)
 
     async def consume(self, package):
         """Handle an incoming message, rebuilding the agent so edits take effect."""
@@ -65,7 +63,7 @@ class Bot(Interface):
 
         # Rebuilt each turn so tool and instruction edits take effect without
         # restarting the process.
-        self.agent = build_agent(self.conf, self.memory)
+        self.agent = build_agent(self.memory, self.default_model)
 
         result = await Runner.run(
             self.agent,
