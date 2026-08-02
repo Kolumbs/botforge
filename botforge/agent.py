@@ -7,7 +7,7 @@ from .openai_tools import to_function_tools
 
 
 UNCONFIGURED_PROMPT = (
-    "You are an unconfigured bot on the botforge platform.\n\n"
+    "You are an unconfigured bot on the kolumbs.net platform.\n\n"
     "To get started:\n"
     "1. If nobody has claimed admin yet, call **claim_admin()** to become the admin.\n"
     "2. Once you're admin, call **set_instructions(text)** to give the bot a personality.\n"
