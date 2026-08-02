@@ -42,6 +42,8 @@ so return a string.
 # it, so this name is the entry point rather than just a default.
 ROOT_AGENT = "main"
 
+DEFAULT_PROVIDER = "openai"
+
 
 @dataclasses.dataclass
 class BotConfig:
@@ -52,6 +54,17 @@ class BotConfig:
     model: str = ""
     description: str = ""  # shown to the agent that calls this one as a tool
     exposed_to: str = ""   # agent that may delegate here; empty means nobody
+    updated_at: str = ""
+
+
+@dataclasses.dataclass
+class Provider:
+    """The LLM behind every agent. Filled in by first-boot setup, not by config."""
+
+    id: int = dataclasses.field(default=1, metadata={"key": True})
+    name: str = DEFAULT_PROVIDER  # openai, anthropic, gemini, ...
+    api_key: str = ""
+    model: str = ""
     updated_at: str = ""
 
 
@@ -107,6 +120,20 @@ class SetInstructionsParams(AdminAuthBase):
     )
 
 
+class SetProviderParams(AdminAuthBase):
+    """Parameters for set_provider."""
+
+    api_key: str = pydantic.Field(default="", description="API key. Empty keeps the current one.")
+    provider: str = pydantic.Field(
+        default="",
+        description="Provider name: openai, anthropic, gemini, ... Empty keeps the current one.",
+    )
+    model: str = pydantic.Field(
+        default="",
+        description="Default model within that provider, e.g. gpt-4o-mini. Empty keeps the current one.",
+    )
+
+
 class DefineAgentParams(AdminAuthBase):
     """Parameters for define_agent."""
 
@@ -148,14 +175,19 @@ class DeleteAgentParams(AdminAuthBase):
     )
 
 
-def _is_admin_talker(memory, talker):
+def list_admin_talkers(memory):
+    """Every session granted admin. Empty means the device is unclaimed."""
+    return list(memory.get("admingrant"))
+
+
+def is_admin_talker(memory, talker):
     """Check if a talker has admin privileges."""
     if not talker:
         return False
     return bool(memory.get.admingrant(talker=talker))
 
 
-def _grant_admin(memory, talker):
+def grant_admin_talker(memory, talker):
     """Grant admin privileges to a talker, persisting the grant."""
     if not talker:
         return False
@@ -224,7 +256,7 @@ async def claim_admin(ctx: dict, params: AdminAuthBase) -> str:
             "ask an existing admin to call grant_admin."
         )
 
-    if _grant_admin(memory, talker):
+    if grant_admin_talker(memory, talker):
         return f"Granted! You are now the admin for this bot. You can now call define_tool, set_instructions, etc."
     else:
         return "Failed to grant admin. Please try again."
@@ -235,10 +267,10 @@ async def grant_admin(ctx: dict, params: GrantAdminParams) -> str:
     memory = ctx.get("memory")
     talker = ctx.get("talker")
 
-    if not _is_admin_talker(memory, talker):
+    if not is_admin_talker(memory, talker):
         return "You must be admin to grant admin to others. Call claim_admin first."
 
-    if _grant_admin(memory, params.talker):
+    if grant_admin_talker(memory, params.talker):
         return f"Granted admin to session {params.talker}."
     else:
         return f"Failed to grant admin to {params.talker}."
@@ -249,7 +281,7 @@ async def set_instructions(ctx: dict, params: SetInstructionsParams) -> str:
     memory = ctx.get("memory")
     talker = ctx.get("talker")
 
-    if not _is_admin_talker(memory, talker):
+    if not is_admin_talker(memory, talker):
         return "You must be admin to set instructions. Call claim_admin first."
 
     try:
@@ -274,12 +306,58 @@ async def set_instructions(ctx: dict, params: SetInstructionsParams) -> str:
         return f"Failed to set instructions: {e}"
 
 
+def get_provider(memory):
+    """Return the stored Provider row, or None before setup has run."""
+    return memory.get.provider(id=1)
+
+
+def save_provider(memory, name=None, api_key=None, model=None):
+    """Create or update the Provider row, leaving unspecified fields alone."""
+    provider = memory.get.provider(id=1) or Provider()
+    if name:
+        provider.name = name
+    if api_key:
+        provider.api_key = api_key
+    if model:
+        provider.model = model
+    provider.updated_at = datetime.now(timezone.utc).isoformat()
+    memory.put(provider)
+    return provider
+
+
+def clear_provider(memory):
+    """Forget the configured LLM so first-boot setup runs again."""
+    provider = memory.get.provider(id=1)
+    if provider:
+        memory.delete(provider)
+
+
+async def set_provider(ctx: dict, params: SetProviderParams) -> str:
+    """Change the LLM provider, key or default model (admin-only)."""
+    memory = ctx.get("memory")
+    talker = ctx.get("talker")
+
+    if not is_admin_talker(memory, talker):
+        return "You must be admin to change the provider. Call claim_admin first."
+    if not (params.api_key or params.provider or params.model):
+        provider = get_provider(memory)
+        if not provider:
+            return "No provider configured yet."
+        return f"Provider {provider.name}, model {provider.model}, key ending {provider.api_key[-4:]}."
+
+    provider = save_provider(memory, params.provider, params.api_key, params.model)
+    return (
+        f"Provider set to {provider.name}, model {provider.model}. "
+        "It takes effect on the next message."
+    )
+
+
 async def define_agent(ctx: dict, params: DefineAgentParams) -> str:
     """Create or update an agent that another agent can delegate to (admin-only)."""
     memory = ctx.get("memory")
     talker = ctx.get("talker")
 
-    if not _is_admin_talker(memory, talker):
+    if not is_admin_talker(memory, talker):
         return "You must be admin to define agents. Call claim_admin first."
 
     if params.name == params.exposed_to:
@@ -337,7 +415,7 @@ async def define_tool(ctx: dict, params: DefineToolParams) -> str:
     memory = ctx.get("memory")
     talker = ctx.get("talker")
 
-    if not _is_admin_talker(memory, talker):
+    if not is_admin_talker(memory, talker):
         return "You must be admin to define tools. Call claim_admin first."
 
     _, _, error = load_tool_source(params.source_code)
@@ -384,7 +462,7 @@ async def disable_tool(ctx: dict, params: ToolNameParams) -> str:
     memory = ctx.get("memory")
     talker = ctx.get("talker")
 
-    if not _is_admin_talker(memory, talker):
+    if not is_admin_talker(memory, talker):
         return "You must be admin to disable tools. Call claim_admin first."
 
     try:
@@ -403,7 +481,7 @@ async def enable_tool(ctx: dict, params: ToolNameParams) -> str:
     memory = ctx.get("memory")
     talker = ctx.get("talker")
 
-    if not _is_admin_talker(memory, talker):
+    if not is_admin_talker(memory, talker):
         return "You must be admin to enable tools. Call claim_admin first."
 
     tool = memory.get.dynamictool(name=params.name)
@@ -421,7 +499,7 @@ async def delete_tool(ctx: dict, params: ToolNameParams) -> str:
     memory = ctx.get("memory")
     talker = ctx.get("talker")
 
-    if not _is_admin_talker(memory, talker):
+    if not is_admin_talker(memory, talker):
         return "You must be admin to delete tools. Call claim_admin first."
 
     tool = memory.get.dynamictool(name=params.name)
@@ -440,7 +518,7 @@ async def delete_agent(ctx: dict, params: DeleteAgentParams) -> str:
     memory = ctx.get("memory")
     talker = ctx.get("talker")
 
-    if not _is_admin_talker(memory, talker):
+    if not is_admin_talker(memory, talker):
         return "You must be admin to delete agents. Call claim_admin first."
 
     if params.name == ROOT_AGENT:
@@ -507,6 +585,15 @@ def build_bootstrap_tool_specs() -> list[ToolSpec]:
             ),
             params=DefineToolParams,
             handler=define_tool,
+        ),
+        ToolSpec(
+            name="set_provider",
+            description=(
+                "Change the LLM provider, API key or default model (admin-only). "
+                "Called with no arguments it reports the current setting."
+            ),
+            params=SetProviderParams,
+            handler=set_provider,
         ),
         ToolSpec(
             name="define_agent",

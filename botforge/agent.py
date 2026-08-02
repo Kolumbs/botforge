@@ -5,9 +5,11 @@ import logging
 from agents import Agent
 
 from .dynamic_tools import (
+    DEFAULT_PROVIDER,
     ROOT_AGENT,
     build_bootstrap_tool_specs,
     build_dynamic_tool_specs,
+    get_provider,
 )
 from .openai_tools import to_function_tools
 
@@ -15,61 +17,64 @@ from .openai_tools import to_function_tools
 log = logging.getLogger(__name__)
 
 
+# Shown until an administrator gives this bot a personality with
+# set_instructions. Setup has already run by the time an agent exists, so the
+# administrator and the LLM are in place and only the character is missing.
 UNCONFIGURED_PROMPT = (
-    "You are an unconfigured bot on the kolumbs.net platform.\n\n"
-    "To get started:\n"
-    "1. If nobody has claimed admin yet, call **claim_admin()** to become the admin.\n"
-    "2. Once you're admin, call **set_instructions(text)** to give the bot a personality.\n"
-    "3. Then call **define_tool(name, description, source_code)** to teach the bot new capabilities.\n\n"
-    "For more, call **list_tools()** to see all available tools.\n"
-    "Remember: only the admin can modify the bot's behavior."
+    "You are a bot on the kolumbs.net platform that has not been given a "
+    "character yet.\n\n"
+    "Say so plainly, and tell the administrator they can:\n"
+    "- give you a personality with **set_instructions(text)**\n"
+    "- teach you a capability with **define_tool(name, description, source_code)**\n"
+    "- create a specialist to delegate to with **define_agent(...)**\n"
+    "- change the model or key with **set_provider(...)**\n\n"
+    "Call **list_tools()** or **list_agents()** to show what already exists. "
+    "Only the administrator can change any of this."
 )
 
-DEFAULT_MODEL = "gpt-4o-mini"
-
-
-def resolve_model(name, api_key):
+def resolve_model(provider, model):
     """Return something an Agent can use as its model.
 
-    A bare name (``gpt-4o-mini``) uses the SDK's OpenAI path, which reads the
-    key configured at startup. A provider-qualified name
-    (``anthropic/claude-opus-5``, ``gemini/...``) goes through LiteLLM, which
-    the SDK ships as an optional extra and which is handed the same key.
+    OpenAI is the SDK's native path and takes a plain model name. Every other
+    provider goes through LiteLLM, which the SDK ships as an optional extra and
+    which is handed the stored key directly.
     """
-    if "/" not in name:
-        return name
+    if provider.name == DEFAULT_PROVIDER:
+        return model
     try:
         from agents.extensions.models.litellm_model import LitellmModel
     except ImportError:
         raise RuntimeError(
-            f"Model {name!r} names a provider, which needs LiteLLM. "
+            f"Provider {provider.name!r} needs LiteLLM. "
             "Install it with: pip install 'botforge[litellm]'"
         ) from None
-    return LitellmModel(model=name, api_key=api_key)
+    return LitellmModel(model=f"{provider.name}/{model}", api_key=provider.api_key)
 
 
-def build_agent(memory, conf, name=ROOT_AGENT):
+def build_agent(memory, name=ROOT_AGENT):
     """Assemble an Agent from stored configuration and tools.
 
-    Agents that name this one in ``exposed_to`` are built too and attached as
-    tools, so the returned agent can delegate to them. Only the root agent
-    carries the bootstrap tools; a specialist gets just its own.
+    Everything comes from the database, including which LLM to use - see
+    ``setup``, which fills that in on first boot. Agents that name this one in
+    ``exposed_to`` are built too and attached as tools, so the returned agent
+    can delegate to them. Only the root agent carries the bootstrap tools.
 
     :param memory: a membank.LoadMemory (SQLite dataclass store).
-    :param conf: the ``[botforge]`` config section, for ``api_key`` and the
-        default ``model``.
     :param name: which agent to build; defaults to the one people talk to.
     :return: an agents.Agent ready to run.
     """
-    return _build(memory, name, conf, frozenset())
+    provider = get_provider(memory)
+    if not provider or not provider.api_key:
+        raise RuntimeError("No LLM configured yet - run first-boot setup")
+    return _build(memory, name, provider, frozenset())
 
 
-def _build(memory, name, conf, building):
+def _build(memory, name, provider, building):
     """Build one agent, recursing into whatever delegates from it."""
     config = memory.get.botconfig(name=name)
 
     instructions = UNCONFIGURED_PROMPT if name == ROOT_AGENT else ""
-    model = conf.get("model", DEFAULT_MODEL)
+    model = provider.model
     if config:
         instructions = config.instructions or config.description or instructions
         model = config.model or model
@@ -93,7 +98,7 @@ def _build(memory, name, conf, building):
             )
             continue
         tools.append(
-            _build(memory, sub.name, conf, building).as_tool(
+            _build(memory, sub.name, provider, building).as_tool(
                 tool_name=sub.name,
                 tool_description=sub.description or f"Delegate to the {sub.name} agent.",
             )
@@ -102,6 +107,6 @@ def _build(memory, name, conf, building):
     return Agent(
         name=name,
         instructions=instructions,
-        model=resolve_model(model, conf.get("api_key")),
+        model=resolve_model(provider, model),
         tools=tools,
     )

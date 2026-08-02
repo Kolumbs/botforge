@@ -1,8 +1,9 @@
 """Zoozl plugin: the generic botforge interface.
 
-This Interface loads bots from botforge's own database and manages the agent
-lifecycle. Tool and instruction changes are picked up on the next turn without
-a process restart.
+Almost nothing is configured in files. A device boots knowing only where to put
+its database; the administrator, the LLM, and every agent and tool are set up
+by talking to it. Until an LLM is configured there is nothing to run an agent
+with, so messages go to ``setup``, a plain state machine, instead.
 
 botforge does not use zoozl's ``root.memory``. That store belongs to zoozl and
 holds its conversation-routing state; a bot's identity, tools and history are
@@ -17,7 +18,9 @@ import membank
 from agents import Runner, set_default_openai_key
 from zoozl.chatbot import Interface
 
+from . import setup
 from .agent import build_agent
+from .dynamic_tools import DEFAULT_PROVIDER, get_provider, is_admin_talker
 from .session import WindowedSession
 
 
@@ -30,34 +33,48 @@ class Bot(Interface):
     """Generic botforge interface: one agent, configuration and tools from database."""
 
     def load(self, root):
-        """Open botforge's database, apply the API key, build the agent."""
-        try:
-            conf = root.conf["botforge"]
-            api_key = conf["api_key"]
-        except KeyError:
-            raise RuntimeError(
-                "botforge requires an 'api_key' in config [botforge] section"
-            ) from None
+        """Open botforge's database. Everything else is set up by conversation."""
+        conf = root.conf.get("botforge", {})
 
-        # The SDK's OpenAI path takes its key globally; set it once here rather
-        # than on every turn. Other providers are handed the same key in
-        # agent.resolve_model.
-        set_default_openai_key(api_key)
-
-        self.conf = conf
         self.history_window = conf.get("history_window", 10)
         self.aliases = set(conf.get("aliases", ["bot", "help", "greet"]))
+        # Optional. Without it, the first person to reach the device can claim
+        # it - fine on a private channel, less so on a public one.
+        self.admin_password = conf.get("admin_password", "")
 
         # One file holds everything botforge owns: config, tools and history.
         self.database = os.path.abspath(conf.get("database", DEFAULT_DATABASE))
         self.memory = membank.LoadMemory(f"sqlite:///{self.database}")
+        self.applied_key = None
 
-        self.agent = build_agent(self.memory, self.conf)
+    def apply_provider_key(self):
+        """Hand the SDK the stored key, once per change rather than per turn."""
+        provider = get_provider(self.memory)
+        if provider.name != DEFAULT_PROVIDER:
+            return  # other providers get the key when their model is built
+        if provider.api_key != self.applied_key:
+            set_default_openai_key(provider.api_key)
+            self.applied_key = provider.api_key
 
     async def consume(self, package):
-        """Handle an incoming message, rebuilding the agent so edits take effect."""
+        """Run setup until the device is configured, then hand over to the agent."""
         package.conversation.subject = "bot"
         text = package.last_message_text
+        talker = package.talker
+
+        if (text or "").strip().lower() == setup.RESET_COMMAND and is_admin_talker(
+            self.memory, talker
+        ):
+            setup.reset(self.memory)
+            self.applied_key = None
+            package.callback(setup.advance(self.memory, talker, "", self.admin_password))
+            return
+
+        if not setup.is_configured(self.memory):
+            package.callback(
+                setup.advance(self.memory, talker, text, self.admin_password)
+            )
+            return
 
         if not text:
             package.callback(
@@ -66,9 +83,11 @@ class Bot(Interface):
             )
             return
 
+        self.apply_provider_key()
+
         # Rebuilt each turn so tool and instruction edits take effect without
         # restarting the process.
-        self.agent = build_agent(self.memory, self.conf)
+        self.agent = build_agent(self.memory)
 
         result = await Runner.run(
             self.agent,

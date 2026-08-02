@@ -9,6 +9,7 @@ botforge is a minimal chatbot platform where bot personality and capabilities ar
 ### Core Components
 
 1. **botforge/dynamic_tools.py** — Dataclasses for persistence + bootstrap tools
+   - `Provider`: The LLM behind every agent — name, api_key, default model. Written by first-boot setup, changed later with `set_provider`
    - `BotConfig`: One row per agent — instructions, model, and `exposed_to` (which agent may delegate to it). The agent named `main` is the one people talk to.
    - `AdminGrant`: Tracks which session talkers have admin privileges
    - `DynamicTool`: Stores tool definitions (name, description, Python source code, and the `agent` that owns it)
@@ -18,6 +19,7 @@ botforge is a minimal chatbot platform where bot personality and capabilities ar
      - `set_instructions(text, model?)`: Admin sets bot's personality
      - `define_tool(name, description, source_code, agent?)`: Admin creates new tools
      - `define_agent(name, description, instructions, exposed_to?)`: Admin creates a specialist the caller can delegate to
+     - `set_provider(api_key?, provider?, model?)`: Admin changes the LLM; with no arguments it reports the current one
      - `list_tools()`, `list_agents()`: Inspection
      - `disable_tool(name)` / `enable_tool(name)`: Turn a tool off and on, keeping its source
      - `delete_tool(name)`: Remove a tool and its source for good
@@ -31,8 +33,8 @@ botforge is a minimal chatbot platform where bot personality and capabilities ar
    - Swapping agent frameworks means writing a sibling of this file; nothing else changes
 
 4. **botforge/agent.py** — Agent assembly
-   - `build_agent(memory, conf)`: Loads BotConfig and DynamicTool rows, falls back to the generic unconfigured prompt if none exist, assembles an Agent with bootstrap + dynamic tools
-   - `resolve_model(name, api_key)`: Bare name uses the SDK's OpenAI path; `provider/name` routes through LiteLLM, handed the same key
+   - `build_agent(memory)`: Loads the stored `Provider`, plus BotConfig and DynamicTool rows, falls back to the generic unconfigured prompt if none exist, assembles an Agent with bootstrap + dynamic tools
+   - `resolve_model(provider, model)`: OpenAI uses the SDK's native path; any other provider routes through LiteLLM, handed the stored key
    - `UNCONFIGURED_PROMPT`: Generic fallback shown on a fresh database, explains how to use `claim_admin`, `define_tool`, `set_instructions`
 
 5. **botforge/plugin.py** — zoozl Interface
@@ -41,7 +43,12 @@ botforge is a minimal chatbot platform where bot personality and capabilities ar
    - `consume(package)`: Per message, rebuilds agent (to pick up instruction/tool changes), runs `Runner.run(...)`, sends reply
    - Aliases read from config (`conf["botforge"]["aliases"]`), not hardcoded
 
-6. **botforge/session.py** — Conversation history
+6. **botforge/setup.py** — First-boot setup, with no LLM
+   - A device ships with no administrator, key or model, so there is nothing to run an agent with. `advance(memory, talker, text)` drives a plain state machine that claims the device, takes `<provider> <key>`, then a model.
+   - Each step is derived from what is in the database, not from conversation state, so a restart or dropped connection resumes where it left off.
+   - Imports no LLM SDK, which is the whole point.
+
+7. **botforge/session.py** — Conversation history
    - `WindowedSession`: SDK-free SQLite conversation store that replays only the last N items to the LLM (default 10), avoiding prompt bloat while keeping full history persisted
 
 ## How It Works
@@ -53,6 +60,7 @@ botforge opens its own `membank.LoadMemory` over the file named by `database` in
 membank is a SQLite dataclass ORM, so each `@dataclass` becomes a table. Conversation history is log-shaped rather than dataclass-shaped, so `session.py` manages its own table in the same file:
 
 ```sql
+CREATE TABLE provider    (id INTEGER PRIMARY KEY, name TEXT, api_key TEXT, model TEXT, updated_at TEXT);
 CREATE TABLE botconfig   (name TEXT PRIMARY KEY, instructions TEXT, model TEXT, description TEXT, exposed_to TEXT, updated_at TEXT);
 CREATE TABLE admingrant  (talker TEXT PRIMARY KEY, granted_at TEXT);
 CREATE TABLE dynamictool (name TEXT PRIMARY KEY, agent TEXT, description TEXT, source_code TEXT, enabled BOOLEAN, created_by TEXT, updated_at TEXT, contract_version INTEGER);
@@ -67,6 +75,13 @@ Bootstrap tools are the only hardcoded Python functions in the system. They're a
 2. **Admin calls `set_instructions(text, model?)`** — updates the singleton `BotConfig` row. On the next message, the agent will use the new instructions.
 3. **Admin calls `define_tool(name, description, source_code)`** — `exec`s the source to validate it defines `Params` (a pydantic model) and `handler` (an async function). If valid, stores it in the `DynamicTool` table. On the next message, the new tool appears in the agent's tool list.
 4. **Subsequent messages** — the agent rebuilds from BotConfig + all enabled DynamicTools, no restart needed.
+
+### First boot
+
+Nothing about the LLM lives in config. A new device answers its first message
+with a claim prompt, takes the provider and key, then the model, and only then
+can an agent be built. `set_provider` changes it later, and an administrator
+sending `/setup` clears the provider and runs the flow again.
 
 ### Delegation
 
@@ -113,18 +128,13 @@ Create a TOML file (e.g., `my_bot.toml`):
 
 ```toml
 [botforge]
-api_key = "sk-..."          # Required: credential for whichever provider you use
-model = "gpt-4o-mini"       # Optional: bare name = OpenAI, "provider/name" = LiteLLM
-aliases = ["bot", "help"]   # Optional: which aliases route to this bot
-database = "my_bot.db"      # Optional: botforge's own database (default botforge.db)
-history_window = 10         # Optional: how many messages to replay per turn
-
-[slack]
-signing_secret = "..."
-workspace_token = "..."
-
-[websocket]
-port = 8000
+# Everything is optional. A device can boot with an empty section and be
+# configured entirely by talking to it.
+database = "my_bot.db"      # where botforge keeps its data (default botforge.db)
+aliases = ["bot", "help"]   # which zoozl aliases route here
+history_window = 10         # how many messages to replay per turn
+admin_password = "..."      # if set, required to claim the device; otherwise
+                            # the first person to reach it becomes admin
 ```
 
 Then run:

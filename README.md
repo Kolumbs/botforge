@@ -13,19 +13,18 @@ A chatbot platform where bot personality and capabilities are entirely database 
 ## Getting started
 
 1. Install: `pip install -e .` (depends on `zoozl>=0.2.9` and `openai-agents`).
-2. Configure: Create a TOML config file (e.g., `my_bot.toml`) with:
+2. Configure: create a TOML config file (e.g. `my_bot.toml`). Everything is optional:
    ```toml
    [botforge]
-   api_key = "your-openai-api-key"
+   database = "my_bot.db"
    aliases = ["bot", "help", "greet"]
-   database = "my_bot.db"          # botforge's own database
-   
+
    [slack]
    signing_secret = "..."
    workspace_token = "..."
    ```
 3. Run: `python -m zoozl my_bot.toml` (the config needs `extensions = ["botforge.plugin"]`)
-4. Chat: Say hello to the bot, claim admin, and start teaching it.
+4. Chat: the device has no LLM yet, so it walks you through claiming it and supplying a provider, key and model — then you can start teaching it.
 
 ## Project layout
 
@@ -35,7 +34,8 @@ botforge/
     ├── __init__.py         # Empty by design - keeps the layers below SDK-free
     ├── tools.py            # ToolSpec: framework-neutral tool descriptor   ─┐
     ├── dynamic_tools.py    # Dataclasses, bootstrap tools, tool contract    ├─ no SDK
-    ├── session.py          # Sliding-window conversation history           ─┘
+    ├── session.py          # Sliding-window conversation history            │
+    ├── setup.py            # First-boot configuration, before any LLM      ─┘
     ├── openai_tools.py     # ToolSpec → agents.FunctionTool adapter        ─┐
     ├── agent.py            # build_agent(): assembles instructions + tools  ├─ framework
     └── plugin.py           # Bot(Interface): zoozl wiring, the agent loop  ─┘
@@ -48,6 +48,7 @@ adapter plus two call sites.
 
 Every bot instance ships with these built-in tools:
 
+- `set_provider(api_key?, provider?, model?)` — Change the LLM; with no arguments it reports the current one (admin-only).
 - `claim_admin()` — Mark the current session as the bot's admin (first-come, first-served).
 - `grant_admin(talker)` — Add another session ID as admin (admin-only).
 - `set_instructions(text, model?)` — Set the bot's system prompt and optionally the model (admin-only).
