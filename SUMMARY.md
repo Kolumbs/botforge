@@ -134,12 +134,12 @@ python -m zoozl profile_bot.toml
 ```
 @bot set_instructions
 
-I'm your personal assistant...
+You're the help desk for a bike shop...
 
 @bot define_tool
 
-name: get_contact
-description: Returns Juris's email
+name: opening_hours
+description: When the shop is open
 source_code:
 ...
 ```
@@ -147,7 +147,7 @@ source_code:
 5. Test:
 
 ```
-@bot What's your contact info?
+@bot Are you open on Sunday?
 ```
 
 Done. No code changes, no redeployment.

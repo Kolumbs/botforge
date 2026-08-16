@@ -1,238 +1,127 @@
-# Quick Start: Creating the Profile Bot via Chat
+# Quick start: chatting a bot into existence
 
-Once botforge is deployed (with zoozl, the transport layer), here's how to chat the profile bot into existence.
+A freshly deployed device knows nothing — no administrator, no LLM, no
+personality, no tools. Everything below happens in conversation; nothing here
+requires editing a file or restarting anything.
 
-## Prerequisites
+The example builds a help desk for a fictional bike shop. Substitute your own.
 
-1. A running botforge instance (zoozl server with botforge plugin loaded)
-2. Access via your configured transport (Slack, WebSocket, email, etc.)
-3. `OPENAI_API_KEY` configured in the zoozl config
+## Before you start
 
-## Step 1: Claim Admin
+- A running botforge instance — see [example.toml](example.toml) and
+  [README.md](README.md).
+- A way to reach it: WebSocket, Slack, email, whatever zoozl is configured for.
+- An API key for one of the supported providers.
 
-**You send:**
+## 1. First contact
+
+The device has no LLM yet, so this exchange is not an agent — it is a plain
+setup flow that runs before any model is reachable.
+
 ```
-claim_admin
-```
-
-**Bot replies:**
-```
-Granted! You are now the admin for this bot. You can now call define_tool, set_instructions, etc.
-```
-
-## Step 2: Set Instructions (Bot Personality)
-
-**You send:**
-```
-set_instructions
-
-I'm Juris Kaminskis' personal assistant. I can answer questions about Juris:
-- His contact information (email, phone, LinkedIn, etc.)
-- His work experience and skills
-- His background and interests
-
-I'm friendly and professional. If someone asks about something I don't know, I'll say so.
+bot:  System is not configured yet. Please supply agent provider
+      (e.g. openai, anthropic, gemini)
+you:  openai
+bot:  Provider registered. Please supply valid api-key of the provider.
+you:  sk-...
+bot:  Setup complete. Running openai on gpt-4o-mini. You can give me a
+      personality, teach me tools, or change the model just by asking.
 ```
 
-**Bot replies:**
+Whoever completes this becomes the administrator. If `admin_password` is set in
+config, the device asks for that first.
+
+From here on you are talking to the agent, and everything is a tool call.
+
+## 2. Give it a personality
+
 ```
-Instructions updated. Model: gpt-4o-mini.
-```
-
-## Step 3: Define the CV Tools
-
-### Tool 1: get_juris_contact
-
-**You send:**
-```
-define_tool
-
-name: get_juris_contact
-description: Get Juris Kaminskis' contact details (email, phone, LinkedIn, GitHub, Upwork)
-source_code:
-
-import pydantic
-
-class Params(pydantic.BaseModel):
-    pass
-
-async def handler(ctx, params) -> str:
-    return """
-Juris Kaminskis
-Email: juris.kaminskis@gmail.com
-Phone: +1 (555) 123-4567  # (placeholder)
-LinkedIn: https://www.linkedin.com/in/kolumbs
-GitHub: https://github.com/Kolumbs
-Upwork: https://www.upwork.com/o/profiles/users/_kolumbs/
-"""
+you:  You're the help desk for Cog & Sprocket, a bike shop. Be brief and
+      friendly. If you don't know something, say so rather than guessing.
+bot:  Instructions updated for 'main'.
 ```
 
-**Bot replies:**
+## 3. Teach it something
+
+Tools are Python. The source must define a `Params` model and an async
+`handler`; see the contract in
+[DEVELOPER.md](DEVELOPER.md#the-stored-tool-contract).
+
 ```
-Tool 'get_juris_contact' defined successfully.
-```
+you:  Add a tool called opening_hours that tells people when we're open.
 
-### Tool 2: get_juris_experience
+      import pydantic
 
-**You send:**
-```
-define_tool
+      class Params(pydantic.BaseModel):
+          day: str = pydantic.Field(default="", description="Day to check")
 
-name: get_juris_experience
-description: Get Juris Kaminskis' work experience and skills
-source_code:
+      async def handler(ctx, params) -> str:
+          hours = {
+              "saturday": "10:00-16:00",
+              "sunday": "closed",
+          }
+          return hours.get(params.day.lower(), "09:00-18:00")
 
-import pydantic
-
-class Params(pydantic.BaseModel):
-    pass
-
-async def handler(ctx, params) -> str:
-    return """
-Work Experience:
-- Lead Software Engineer at Acme Corp (2020-present)
-  * Built distributed systems handling 100M+ events/day
-  * Led team of 5 engineers
-  * Tech: Rust, Python, SQL, Kubernetes
-
-- Senior Backend Engineer at StartupXYZ (2018-2020)
-  * Architected microservices platform
-  * Tech: Go, PostgreSQL, gRPC
-
-Skills:
-- Languages: Rust, Python, Go, TypeScript, SQL
-- Systems: Kubernetes, Docker, PostgreSQL, Redis
-- Practices: Distributed systems, API design, DevOps
-
-Education:
-- B.S. Computer Science, University of X (2016)
-"""
+bot:  Tool 'opening_hours' defined successfully for agent 'main'.
 ```
 
-**Bot replies:**
+It is callable on your next message — no restart.
+
 ```
-Tool 'get_juris_experience' defined successfully.
-```
-
-### Tool 3: get_juris_about
-
-**You send:**
-```
-define_tool
-
-name: get_juris_about
-description: Get information about Juris Kaminskis personally - interests, background, personality
-source_code:
-
-import pydantic
-
-class Params(pydantic.BaseModel):
-    pass
-
-async def handler(ctx, params) -> str:
-    return """
-About Juris:
-- Passionate about building reliable, scalable systems
-- Open-source contributor (active on GitHub)
-- Tech conference speaker
-- Avid learner: currently exploring AI/LLM applications
-- Enjoys cycling, reading sci-fi, and travel
-
-Fun fact: Built a chatbot platform that lets you teach bots new capabilities just by talking to them!
-
-Availability: Open to contract work, consulting, or interesting technical challenges.
-"""
+you:  Are you open on Sunday?
+bot:  No, we're closed on Sundays. We're open 9 to 6 on weekdays and
+      10 to 4 on Saturdays.
 ```
 
-**Bot replies:**
-```
-Tool 'get_juris_about' defined successfully.
-```
+## 4. Add a specialist
 
-## Step 4: Test It
+When one bot accumulates too many jobs, give the work its own agent. The main
+bot delegates to it and decides when.
 
-**You send:**
 ```
-What's Juris's email address?
-```
+you:  Create an agent called repairs that handles servicing questions.
+      It should be more technical and ask about the bike before advising.
+bot:  Agent 'repairs' defined. 'main' can now delegate to it.
 
-**Bot replies:**
-```
-Juris Kaminskis' email is: juris.kaminskis@gmail.com
-
-If you need other contact details like phone, LinkedIn, or GitHub, just ask!
+you:  Give repairs a tool called service_price for what a service costs.
+      [...source, with agent="repairs"...]
+bot:  Tool 'service_price' defined successfully for agent 'repairs'.
 ```
 
-**You send:**
+The specialist carries only its own tools — the administrative ones stay on
+`main`, so a delegated call cannot reach them.
+
+## 5. See what exists
+
 ```
-Tell me about Juris's work experience.
-```
+you:  What can you do?
+bot:  Defined tools:
+        - opening_hours [main] (enabled): When the shop is open
+        - service_price [repairs] (enabled): What a service costs
 
-**Bot replies:**
-```
-Juris has extensive experience in distributed systems and backend engineering. Most recently, he was a Lead Software Engineer at Acme Corp from 2020 to present, where he:
-
-- Built distributed systems handling 100M+ events/day
-- Led a team of 5 engineers
-- Used technologies like Rust, Python, SQL, and Kubernetes
-
-Before that, he was a Senior Backend Engineer at StartupXYZ (2018-2020), where he architected microservices platforms using Go, PostgreSQL, and gRPC.
-
-His technical skills span multiple languages (Rust, Python, Go, TypeScript, SQL) and modern DevOps practices. He has a B.S. in Computer Science from the University of X (2016).
-```
-
-## Step 5: Verify
-
-**You send:**
-```
-list_tools
+you:  Which agents are there?
+bot:  Agents:
+        - main (talks to people): opening_hours
+        - repairs (called by main): service_price
 ```
 
-**Bot replies:**
-```
-Defined tools:
-  - get_juris_contact (enabled): Get Juris Kaminskis' contact details
-  - get_juris_experience (enabled): Get Juris Kaminskis' work experience and skills
-  - get_juris_about (enabled): Get information about Juris personally
-```
+## Changing your mind
 
-Done! The profile bot is now fully configured and can answer questions about Juris entirely from database-driven tool definitions.
+| You want to | Ask for |
+|---|---|
+| Retire a tool but keep it | `disable_tool`, later `enable_tool` |
+| Remove a tool for good | `delete_tool` |
+| Remove an agent and its tools | `delete_agent` |
+| Switch model or provider | `set_provider` |
+| Hand admin to another device | `grant_admin` with that session's id |
+| Start the LLM setup over | send `/setup` |
 
-## Adding More Tools Later
+## Notes
 
-Just call `define_tool` again with a new tool name and source code. No redeploy, no code changes.
-
-## Disabling Tools
-
-If you want to disable a tool (but keep it for later):
-
-**You send:**
-```
-disable_tool
-
-name: get_juris_about
-```
-
-**Bot replies:**
-```
-Tool 'get_juris_about' disabled.
-```
-
-It won't be offered to the LLM anymore, but the source code stays in the database so you can re-enable it if needed.
-
-## Updating Bot Personality
-
-Just call `set_instructions` again with new text:
-
-**You send:**
-```
-set_instructions
-
-I'm now a humorous version of Juris's assistant...
-```
-
-On the next message, the bot will adopt the new personality.
-
----
-
-**That's it!** You've built a complete chatbot by chatting, with zero code changes or redeployment.
+- **The administrator can run code.** A tool is Python executed in the bot's
+  process, unsandboxed. Anyone you grant admin to can do anything the process
+  can. See the security notes in [README.md](README.md).
+- **Tools are stored, not compiled.** The source stays readable and editable by
+  chat; `define_tool` with an existing name replaces it.
+- **A tool that needs a package which is not installed will be refused** at
+  definition time, with the import error.
