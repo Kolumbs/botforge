@@ -19,13 +19,7 @@ log = logging.getLogger(__name__)
 
 
 def resolve_model(provider, model):
-    """Bind a model to the adapter.
-
-    LiteLLM is the adapter for every provider - it is botforge's own choice, not
-    a setting. The stored provider name is LiteLLM's own, so it needs no
-    translation, and the key travels with the model rather than through global
-    SDK state.
-    """
+    """Bind a model to the adapter."""
     return LitellmModel(
         model=f"{provider.name}/{model}", api_key=provider.api_key
     )
