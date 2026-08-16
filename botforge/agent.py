@@ -19,15 +19,16 @@ log = logging.getLogger(__name__)
 
 
 def resolve_model(provider, model):
-    """Return something an Agent can use as its model.
+    """Bind a model to the adapter.
 
-    One provider is the SDK's native path and takes a plain model name. The
-    rest go through LiteLLM, handed the stored key directly.
+    LiteLLM is the adapter for every provider - it is botforge's own choice, not
+    a setting. The stored provider name is LiteLLM's own, so it needs no
+    translation, and the key travels with the model rather than through global
+    SDK state.
     """
-    prefix = PROVIDERS.get(provider.name, {}).get("litellm_prefix", provider.name)
-    if not prefix:
-        return model
-    return LitellmModel(model=f"{prefix}/{model}", api_key=provider.api_key)
+    return LitellmModel(
+        model=f"{provider.name}/{model}", api_key=provider.api_key
+    )
 
 
 def build_agent(memory, name=ROOT_AGENT, unconfigured_prompt=""):
@@ -48,6 +49,11 @@ def build_agent(memory, name=ROOT_AGENT, unconfigured_prompt=""):
     provider = get_provider(memory)
     if not provider or not provider.api_key:
         raise RuntimeError("No LLM configured yet - run first-boot setup")
+    if provider.name not in PROVIDERS:
+        raise RuntimeError(
+            f"Stored provider {provider.name!r} is not one the adapter can "
+            f"reach; expected one of: {', '.join(PROVIDERS)}"
+        )
     return _build(memory, name, provider, unconfigured_prompt, frozenset())
 
 

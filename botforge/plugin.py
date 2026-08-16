@@ -15,12 +15,12 @@ import logging
 import os
 
 import membank
-from agents import Runner, set_default_openai_key
+from agents import Runner
 from zoozl.chatbot import Interface
 
 from . import setup
 from .agent import build_agent
-from .dynamic_tools import PROVIDERS, get_provider, is_admin_talker
+from .dynamic_tools import is_admin_talker
 from .session import WindowedSession
 
 
@@ -53,22 +53,12 @@ class Bot(Interface):
         # One file holds everything botforge owns: config, tools and history.
         self.database = os.path.abspath(conf.get("database", DEFAULT_DATABASE))
         self.memory = membank.LoadMemory(f"sqlite:///{self.database}")
-        self.applied_key = None
 
     def setup_step(self, talker, text):
         """One turn of the pre-LLM setup exchange."""
         return setup.advance(
             self.memory, talker, text, self.messages, self.admin_password
         )
-
-    def apply_provider_key(self):
-        """Hand the SDK the stored key, once per change rather than per turn."""
-        provider = get_provider(self.memory)
-        if PROVIDERS.get(provider.name, {}).get("litellm_prefix", provider.name):
-            return  # LiteLLM providers get the key when their model is built
-        if provider.api_key != self.applied_key:
-            set_default_openai_key(provider.api_key)
-            self.applied_key = provider.api_key
 
     async def consume(self, package):
         """Run setup until the device is configured, then hand over to the agent."""
@@ -80,7 +70,6 @@ class Bot(Interface):
             self.memory, talker
         ):
             setup.reset(self.memory)
-            self.applied_key = None
             package.callback(self.setup_step(talker, ""))
             return
 
@@ -92,8 +81,6 @@ class Bot(Interface):
             # A connect with nothing said. A configured bot speaks in its own
             # voice, and there is nothing to answer yet, so say nothing.
             return
-
-        self.apply_provider_key()
 
         # Rebuilt each turn so tool and instruction edits take effect without
         # restarting the process.

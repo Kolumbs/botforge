@@ -154,7 +154,7 @@ def _take_provider(memory, text, messages):
     if name not in PROVIDERS:
         return say(messages, "bad_provider", value=text)
 
-    save_provider(memory, name=name, model=PROVIDERS[name]["model"])
+    save_provider(memory, name=name)
     return say(messages, "provider_registered")
 
 

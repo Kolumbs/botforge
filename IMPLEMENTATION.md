@@ -34,7 +34,7 @@ botforge is a minimal chatbot platform where bot personality and capabilities ar
 
 4. **botforge/agent.py** — Agent assembly
    - `build_agent(memory, name?, unconfigured_prompt?)`: Loads the stored `Provider`, plus BotConfig and DynamicTool rows, falls back to the generic unconfigured prompt if none exist, assembles an Agent with bootstrap + dynamic tools
-   - `resolve_model(provider, model)`: OpenAI uses the SDK's native path; any other provider routes through LiteLLM, handed the stored key. LiteLLM is a hard dependency, so a missing install fails at import rather than at the first message
+   - `resolve_model(provider, model)`: binds the model to the LiteLLM adapter as `provider/model`, with the stored key passed explicitly — no global SDK state
    - The text a bot uses before it has a personality is not in code — it comes from the locale file, or from `unconfigured_prompt` in config to override it.
 
 5. **botforge/plugin.py** — zoozl Interface
@@ -90,9 +90,9 @@ individual lines on top of whichever locale is loaded.
 Nothing about the LLM lives in config:
 
 ```
-bot: System is not configured yet. Please supply agent provider (e.g. openai, claude, gemini)
+bot: System is not configured yet. Please supply agent provider (e.g. openai, anthropic, gemini)
 you: siluet
-bot: 'siluet' is not correct provider. Please supply agent provider (e.g. openai, claude, gemini)
+bot: 'siluet' is not correct provider. Please supply agent provider (e.g. openai, anthropic, gemini)
 you: openai
 bot: Provider registered. Please supply valid api-key of the provider.
 you: sk-...
@@ -104,10 +104,26 @@ one; `set_provider` changes it afterwards through the agent. An administrator
 sending `/setup` clears the provider and runs the flow again, keeping
 administrators.
 
-Providers are `openai` (the SDK's native path), `claude` and `gemini` (both via
-LiteLLM, which is a hard dependency). Adding one is a row in `PROVIDERS`: the
-name an administrator types, its default model, and the prefix LiteLLM knows it
-by.
+LiteLLM is the adapter for every provider. It is botforge's own choice, not a
+setting — if it cannot reach something, that is an error or an adapter change,
+never a config value. What is configurable is what it gets handed: provider,
+model and key.
+
+`PROVIDERS` is the set it can reach, mapping a name to the model that provider
+starts on. The names are LiteLLM's own, so a name doubles as the prefix and
+adding a provider is one line:
+
+```python
+PROVIDERS = {
+    "openai": "gpt-4o-mini",
+    "anthropic": "claude-sonnet-4-5",
+    "gemini": "gemini-2.0-flash",
+}
+```
+
+`save_provider` is the single write path and validates against it, so a stored
+provider is always one the adapter can be given. Changing the provider moves the
+model to that provider's default unless a model is named in the same call.
 
 ### Delegation
 

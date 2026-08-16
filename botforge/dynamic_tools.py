@@ -42,14 +42,14 @@ so return a string.
 # it, so this name is the entry point rather than just a default.
 ROOT_AGENT = "main"
 
-# The providers an administrator can pick during setup. The key is what they
-# type; litellm_prefix is empty for the one the SDK talks to natively, and
-# otherwise names the provider to LiteLLM. Each brings a default model, so
-# setup never has to ask for one - it can be changed later with set_provider.
+# The providers the adapter can reach, and the model each starts on. The name is
+# LiteLLM's own, so it doubles as the prefix handed to the adapter and there is
+# no second naming scheme to keep in step. The model is only a starting point;
+# an administrator can change it with set_provider.
 PROVIDERS = {
-    "openai": {"model": "gpt-4o-mini", "litellm_prefix": ""},
-    "claude": {"model": "claude-sonnet-4-5", "litellm_prefix": "anthropic"},
-    "gemini": {"model": "gemini-2.0-flash", "litellm_prefix": "gemini"},
+    "openai": "gpt-4o-mini",
+    "anthropic": "claude-sonnet-4-5",
+    "gemini": "gemini-2.0-flash",
 }
 
 
@@ -134,11 +134,14 @@ class SetProviderParams(AdminAuthBase):
     api_key: str = pydantic.Field(default="", description="API key. Empty keeps the current one.")
     provider: str = pydantic.Field(
         default="",
-        description="Provider name: openai, anthropic, gemini, ... Empty keeps the current one.",
+        description=(
+            "Provider name. Empty keeps the current one. Changing it moves to "
+            "that provider's default model unless a model is given too."
+        ),
     )
     model: str = pydantic.Field(
         default="",
-        description="Default model within that provider, e.g. gpt-4o-mini. Empty keeps the current one.",
+        description="Model within that provider, e.g. gpt-4o-mini. Empty keeps the current one.",
     )
 
 
@@ -320,10 +323,22 @@ def get_provider(memory):
 
 
 def save_provider(memory, name=None, api_key=None, model=None):
-    """Create or update the Provider row, leaving unspecified fields alone."""
+    """Create or update the Provider row, leaving unspecified fields alone.
+
+    The single write path for the provider, so validating the name here is
+    enough for everything downstream to trust it. Changing the provider without
+    naming a model moves to that provider's default, since a model belongs to
+    the provider it was chosen for.
+
+    :raises ValueError: if ``name`` is not a provider the adapter can reach.
+    """
+    if name and name not in PROVIDERS:
+        raise ValueError(name)
+
     provider = memory.get.provider(id=1) or Provider()
-    if name:
+    if name and name != provider.name:
         provider.name = name
+        provider.model = PROVIDERS[name]
     if api_key:
         provider.api_key = api_key
     if model:
@@ -353,7 +368,15 @@ async def set_provider(ctx: dict, params: SetProviderParams) -> str:
             return "No provider configured yet."
         return f"Provider {provider.name}, model {provider.model}, key ending {provider.api_key[-4:]}."
 
-    provider = save_provider(memory, params.provider, params.api_key, params.model)
+    try:
+        provider = save_provider(
+            memory, params.provider, params.api_key, params.model
+        )
+    except ValueError as unknown:
+        return (
+            f"'{unknown}' is not a provider I can reach. "
+            f"Choose one of: {', '.join(PROVIDERS)}."
+        )
     return (
         f"Provider set to {provider.name}, model {provider.model}. "
         "It takes effect on the next message."
