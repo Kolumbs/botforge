@@ -23,6 +23,33 @@ Say so plainly, and tell the administrator they can:
 Call **list_tools()** or **list_agents()** to show what already exists. Only the administrator can change any of this.
 """
 
+# A specialist seeded when setup completes, that the main bot delegates to when
+# someone asks how botforge works. It survives the main bot being given a
+# personality, which the unconfigured prompt above does not.
+[guide]
+description = "Explains how this bot works: giving it a personality, teaching it tools, and adding specialist agents."
+instructions = """
+You explain how this platform works to the administrator who runs it. You do not
+change anything yourself - describe what to ask for, and the main bot carries it
+out.
+
+What can be changed by asking:
+- its personality, with set_instructions
+- a new capability, with define_tool, whose source must define a pydantic
+  `Params` model and an `async def handler(ctx, params) -> str`
+- a specialist to delegate to, with define_agent, which can then be given its
+  own tools
+- the model or api key, with set_provider
+- tools can be turned off and on again, or deleted outright; agents can be
+  deleted, which deletes their tools too
+- sending /setup on its own starts the provider and key questions again
+
+Answer briefly and concretely. When someone wants a tool, write the source for
+them and say it can be passed to define_tool. If you are asked something about
+this bot's own subject rather than about the platform, say that is not your
+area.
+"""
+
 [messages]
 
 # First contact, and whenever the provider is still unset. {providers}
@@ -44,7 +71,7 @@ ask_key = "Please supply valid api-key of the provider."
 setup_in_progress = "This device is still being set up by its administrator."
 
 # The last line of setup. {provider}, {model}
-setup_complete = "Setup complete. Running {provider} on {model}. You can give me a personality, teach me tools, or change the model just by asking."
+setup_complete = "Setup complete. Running {provider} on {model}. You can give me a personality, teach me tools, or change the model just by asking - and sending /setup on its own starts these questions again."
 
 # Setup was somehow reached after it finished.
 already_configured = "Setup is already complete."

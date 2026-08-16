@@ -46,6 +46,7 @@ botforge is a minimal chatbot platform where bot personality and capabilities ar
 6. **botforge/setup.py** — First-boot setup, with no LLM
    - A device ships with no administrator, provider or key, so there is nothing to run an agent with. `advance(memory, talker, text)` drives a plain state machine: pick a provider from `PROVIDERS`, then supply its key. The model is that provider's default and is never asked for — `set_provider` changes it later.
    - Each step is derived from what is in the database, not from conversation state, so a restart or dropped connection resumes where it left off.
+   - Completing setup seeds the `guide` agent from the locale, on a device that has none.
    - Imports no LLM SDK, which is the whole point.
    - It contains no English. Every line comes from a locale file (`locales/en.toml`), selected by `language` in config, so a device can be built for a language botforge does not ship. `REQUIRED_MESSAGES` names the lines a locale must define; a missing one is reported when the device starts.
 
@@ -124,6 +125,22 @@ PROVIDERS = {
 `save_provider` is the single write path and validates against it, so a stored
 provider is always one the adapter can be given. Changing the provider moves the
 model to that provider's default unless a model is named in the same call.
+
+### Onboarding
+
+Nobody configuring a bot reads this repository — they are talking to the device.
+So the explanation of how botforge works is an agent, not a document.
+
+When setup completes on a device with no agents of its own, a `guide` agent is
+seeded from the locale's `[guide]` section, delegated from `main`. It explains
+what can be changed by asking and writes tool source when requested, but carries
+no tools itself, so the administrative surface stays on `main`.
+
+It exists because `unconfigured_prompt` is `main`'s own prompt and disappears
+the moment `main` is given a personality — the teaching would otherwise vanish
+exactly when real work starts. Being an ordinary agent, it can be reworded with
+`set_instructions(agent="guide")` or removed with `delete_agent`, and removing
+it sticks.
 
 ### Delegation
 

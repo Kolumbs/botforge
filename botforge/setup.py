@@ -22,18 +22,22 @@ import tomllib
 
 from .dynamic_tools import (
     PROVIDERS,
+    ROOT_AGENT,
     clear_provider,
     get_provider,
     grant_admin_talker,
     is_admin_talker,
     list_admin_talkers,
     save_provider,
+    seed_agent,
 )
 
 
 log = logging.getLogger(__name__)
 
 RESET_COMMAND = "/setup"
+
+GUIDE_AGENT = "guide"
 
 # The names of the lines a device needs, not their text. A locale file must
 # supply all of them; anything missing is caught when it is loaded rather than
@@ -110,7 +114,7 @@ def reset(memory):
     clear_provider(memory)
 
 
-def advance(memory, talker, text, messages, admin_password=""):
+def advance(memory, talker, text, messages, admin_password="", locale=None):
     """Take one step of setup and return the reply to send.
 
     ``messages`` comes from ``load_locale``; there is no default, because the
@@ -130,7 +134,7 @@ def advance(memory, talker, text, messages, admin_password=""):
         return _take_provider(memory, text, messages)
 
     if not provider.api_key:
-        return _take_key(memory, provider, text, messages)
+        return _take_key(memory, provider, text, messages, locale)
 
     return say(messages, "already_configured")
 
@@ -158,10 +162,31 @@ def _take_provider(memory, text, messages):
     return say(messages, "provider_registered")
 
 
-def _take_key(memory, provider, text, messages):
-    """Expecting the provider's API key."""
+def _take_key(memory, provider, text, messages, locale=None):
+    """Expecting the provider's API key. The last step, so seed the guide."""
     if not text or len(text.split()) > 1:
         return say(messages, "ask_key")
 
     save_provider(memory, api_key=text)
+    _seed_guide(memory, locale)
     return say(messages, "setup_complete", provider=provider.name, model=provider.model)
+
+
+def _seed_guide(memory, locale):
+    """Give the device a specialist that explains how it works.
+
+    Seeded only on a device that has no agents at all, so it appears once when
+    a device first becomes usable. After that it is an ordinary agent: editable
+    with set_instructions, removable with delete_agent, and deleting it sticks
+    even if setup is run again.
+    """
+    guide = (locale or {}).get("guide")
+    if not guide or list(memory.get("botconfig")):
+        return  # this device has agents already, so it is not a fresh one
+    seed_agent(
+        memory,
+        name=GUIDE_AGENT,
+        description=guide["description"],
+        instructions=guide["instructions"],
+        exposed_to=ROOT_AGENT,
+    )

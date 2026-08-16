@@ -348,6 +348,21 @@ def save_provider(memory, name=None, api_key=None, model=None):
     return provider
 
 
+def seed_agent(memory, name, description, instructions, exposed_to):
+    """Create an agent if it does not exist yet, leaving an existing one alone."""
+    if memory.get.botconfig(name=name):
+        return None
+    config = BotConfig(
+        name=name,
+        description=description,
+        instructions=instructions,
+        exposed_to=exposed_to,
+        updated_at=datetime.now(timezone.utc).isoformat(),
+    )
+    memory.put(config)
+    return config
+
+
 def clear_provider(memory):
     """Forget the configured LLM so first-boot setup runs again."""
     provider = memory.get.provider(id=1)
@@ -423,7 +438,8 @@ async def list_agents(ctx: dict, params: AdminAuthBase) -> str:
     for tool in memory.get("dynamictool"):
         tools_by_agent.setdefault(tool.agent, []).append(tool.name)
 
-    existing = {config.name for config in configs}
+    # main always exists, with or without a stored row of its own.
+    existing = {config.name for config in configs} | {ROOT_AGENT}
 
     lines = []
     for config in configs:

@@ -17,6 +17,11 @@ A chatbot platform where bot personality and capabilities are entirely database 
 3. Run: `python -m zoozl my_bot.toml` (the config needs `extensions = ["botforge.plugin"]`)
 4. Chat: the device has no LLM yet, so it asks for a provider (`openai`, `anthropic`, `gemini`) and that provider's API key. The model is the provider's default and can be changed later just by asking.
 
+From there the bot explains itself — it is seeded with a `guide` agent that
+answers questions about giving it a personality, teaching it tools and adding
+specialists. There is no setup guide in this repository because nobody
+configuring a bot would be reading it.
+
 ## Project layout
 
 ```

@@ -78,10 +78,9 @@ There is currently no standing suite. When a test is added, async tests need
 
 ## Changing this documentation
 
-The Markdown files at the repository root — this file, `README.md`,
-`IMPLEMENTATION.md`, `SUMMARY.md`, `QUICK_START.md` — are not editable as part of
-feature or bug work. Changing them takes its own targeted merge request that does
-nothing else.
+The Markdown files at the repository root — this file, `README.md` and
+`IMPLEMENTATION.md` — are not editable as part of feature or bug work. Changing
+them takes its own targeted merge request that does nothing else.
 
 This is the testing policy applied to the rules themselves. An implementer who
 can rewrite the documentation in the same change can make any work look
