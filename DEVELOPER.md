@@ -5,12 +5,12 @@ Meant for developers who want to contribute to botforge project.
 ## Dev environment
 
 ```bash
-python3 -m venv .venv
-.venv/bin/pip install -e '.[dev]'
+uv sync --extra dev
 ```
 
-That pulls in `zoozl` and `openai-agents` alongside the package itself, so the
-plugin can be imported and run locally.
+That creates the project virtualenv and pulls in `zoozl` and
+`openai-agents` alongside the package itself, so the plugin can be imported
+and run locally.
 
 ## Layering
 
@@ -89,6 +89,3 @@ change that travels on its own is reviewable on its own merits.
 
 If a change makes a document wrong, say so and raise it separately — do not
 correct it in passing.
-
-**Bootstrapping exception:** the branch that first introduces these files edits
-them freely. The rule takes effect once they land on the main branch.
