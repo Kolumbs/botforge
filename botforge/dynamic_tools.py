@@ -59,7 +59,7 @@ class BotConfig:
 
     name: str = dataclasses.field(default=ROOT_AGENT, metadata={"key": True})
     instructions: str = ""
-    model: str = ""  # legacy field kept for existing rows; ignored at runtime
+    model: str = ""  # optional per-agent model override within the shared provider
     description: str = ""  # shown to the agent that calls this one as a tool
     exposed_to: str = ""   # agent that may delegate here; empty means nobody
     updated_at: str = ""

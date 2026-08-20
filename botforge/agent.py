@@ -18,10 +18,10 @@ from .openai_tools import to_function_tools
 log = logging.getLogger(__name__)
 
 
-def resolve_model(provider):
+def resolve_model(provider, model=""):
     """Bind a model to the adapter."""
     return LitellmModel(
-        model=f"{provider.name}/{provider.model}", api_key=provider.api_key
+        model=f"{provider.name}/{model or provider.model}", api_key=provider.api_key
     )
 
 
@@ -87,6 +87,6 @@ def _build(memory, name, provider, unconfigured, building):
     return Agent(
         name=name,
         instructions=instructions,
-        model=resolve_model(provider),
+        model=resolve_model(provider, config.model if config else ""),
         tools=tools,
     )
