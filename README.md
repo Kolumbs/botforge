@@ -46,10 +46,10 @@ adapter plus two call sites.
 
 Every bot instance ships with these built-in tools:
 
-- `set_provider(api_key?, provider?, model?)` — Change the LLM; with no arguments it reports the current one (admin-only).
+- `set_provider(api_key?, provider?, model?)` — Change the shared LLM provider or its model; with no arguments it reports the current one (admin-only).
 - `claim_admin()` — Mark the current session as the bot's admin (first-come, first-served).
 - `grant_admin(talker)` — Add another session ID as admin (admin-only).
-- `set_instructions(text, model?)` — Set the bot's system prompt and optionally the model (admin-only).
+- `set_instructions(text)` — Set the bot's system prompt (admin-only).
 - `define_tool(name, description, source_code)` — Add a new tool by providing Python source (admin-only). Source must define a `Params` pydantic model and an async `handler` function.
 - `define_agent(name, description, instructions, exposed_to?)` — Create a specialist agent to delegate to (admin-only).
 - `list_tools()` / `list_agents()` — Show what is defined.

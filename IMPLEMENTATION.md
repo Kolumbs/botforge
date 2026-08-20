@@ -10,13 +10,13 @@ botforge is a minimal chatbot platform where bot personality and capabilities ar
 
 1. **botforge/dynamic_tools.py** — Dataclasses for persistence + bootstrap tools
    - `Provider`: The LLM behind every agent — name, api_key, default model. Written by first-boot setup, changed later with `set_provider`
-   - `BotConfig`: One row per agent — instructions, model, and `exposed_to` (which agent may delegate to it). The agent named `main` is the one people talk to.
+   - `BotConfig`: One row per agent — instructions and `exposed_to` (which agent may delegate to it). The agent named `main` is the one people talk to.
    - `AdminGrant`: Tracks which session talkers have admin privileges
    - `DynamicTool`: Stores tool definitions (name, description, Python source code, and the `agent` that owns it)
    - Bootstrap tools that can't themselves be dynamic (they're needed to write to the DB):
      - `claim_admin()`: First caller becomes admin
      - `grant_admin(talker)`: Admin grants privileges to another session
-     - `set_instructions(text, model?)`: Admin sets bot's personality
+     - `set_instructions(text)`: Admin sets bot's personality
      - `define_tool(name, description, source_code, agent?)`: Admin creates new tools
      - `define_agent(name, description, instructions, exposed_to?)`: Admin creates a specialist the caller can delegate to
      - `set_provider(api_key?, provider?, model?)`: Admin changes the LLM; with no arguments it reports the current one
@@ -34,7 +34,7 @@ botforge is a minimal chatbot platform where bot personality and capabilities ar
 
 4. **botforge/agent.py** — Agent assembly
    - `build_agent(memory, name?, unconfigured_prompt?)`: Loads the stored `Provider`, plus BotConfig and DynamicTool rows, falls back to the generic unconfigured prompt if none exist, assembles an Agent with bootstrap + dynamic tools
-   - `resolve_model(provider, model)`: binds the model to the LiteLLM adapter as `provider/model`, with the stored key passed explicitly — no global SDK state
+   - `resolve_model(provider)`: binds the configured provider/model pair to the LiteLLM adapter, with the stored key passed explicitly — no global SDK state
    - The text a bot uses before it has a personality is not in code — it comes from the locale file, or from `unconfigured_prompt` in config to override it.
 
 5. **botforge/plugin.py** — zoozl Interface
@@ -74,7 +74,7 @@ CREATE TABLE conversation_items (id INTEGER PRIMARY KEY AUTOINCREMENT, session_i
 Bootstrap tools are the only hardcoded Python functions in the system. They're always registered, and they're the mechanism that allows everything else to happen (a DB-defined tool can't be the thing that first writes to the DB):
 
 1. **First user calls `claim_admin()`** — they're granted if the `admingrant` table is empty, otherwise they're told someone already claimed it.
-2. **Admin calls `set_instructions(text, model?)`** — updates the singleton `BotConfig` row. On the next message, the agent will use the new instructions.
+2. **Admin calls `set_instructions(text)`** — updates the singleton `BotConfig` row. On the next message, the agent will use the new instructions.
 3. **Admin calls `define_tool(name, description, source_code)`** — `exec`s the source to validate it defines `Params` (a pydantic model) and `handler` (an async function). If valid, stores it in the `DynamicTool` table. On the next message, the new tool appears in the agent's tool list.
 4. **Subsequent messages** — the agent rebuilds from BotConfig + all enabled DynamicTools, no restart needed.
 

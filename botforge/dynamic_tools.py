@@ -55,11 +55,11 @@ PROVIDERS = {
 
 @dataclasses.dataclass
 class BotConfig:
-    """One agent: its personality, model, and who may delegate to it."""
+    """One agent: its personality and who may delegate to it."""
 
     name: str = dataclasses.field(default=ROOT_AGENT, metadata={"key": True})
     instructions: str = ""
-    model: str = ""
+    model: str = ""  # legacy field kept for existing rows; the runtime uses Provider.model
     description: str = ""  # shown to the agent that calls this one as a tool
     exposed_to: str = ""   # agent that may delegate here; empty means nobody
     updated_at: str = ""
@@ -114,14 +114,6 @@ class SetInstructionsParams(AdminAuthBase):
     """Parameters for set_instructions."""
 
     text: str = pydantic.Field(description="The agent's new system instructions/personality.")
-    model: str = pydantic.Field(
-        default="",
-        description=(
-            "(Optional) Model to use. A bare name such as gpt-4o-mini uses OpenAI; "
-            "a provider-qualified name such as anthropic/claude-opus-5 uses LiteLLM. "
-            "Leave empty to keep the current one."
-        ),
-    )
     agent: str = pydantic.Field(
         default=ROOT_AGENT,
         description=f"Which agent to configure. Defaults to '{ROOT_AGENT}', the one people talk to.",
@@ -153,7 +145,6 @@ class DefineAgentParams(AdminAuthBase):
         description="What this agent handles. The delegating agent reads this to decide when to call it."
     )
     instructions: str = pydantic.Field(description="The agent's system instructions.")
-    model: str = pydantic.Field(default="", description="(Optional) Model for this agent.")
     exposed_to: str = pydantic.Field(
         default=ROOT_AGENT,
         description=f"Agent that may delegate to this one. Defaults to '{ROOT_AGENT}'.",
@@ -301,14 +292,11 @@ async def set_instructions(ctx: dict, params: SetInstructionsParams) -> str:
 
         if config:
             config.instructions = params.text
-            if params.model:
-                config.model = params.model
             config.updated_at = now
         else:
             config = BotConfig(
                 name=params.agent,
                 instructions=params.text,
-                model=params.model,
                 updated_at=now,
             )
         memory.put(config)
@@ -414,8 +402,6 @@ async def define_agent(ctx: dict, params: DefineAgentParams) -> str:
         config.description = params.description
         config.instructions = params.instructions
         config.exposed_to = params.exposed_to
-        if params.model:
-            config.model = params.model
         config.updated_at = datetime.now(timezone.utc).isoformat()
         memory.put(config)
         return (
@@ -620,7 +606,7 @@ def build_bootstrap_tool_specs() -> list[ToolSpec]:
         ),
         ToolSpec(
             name="set_instructions",
-            description="Set the bot's system instructions and optionally the model (admin-only).",
+            description="Set the bot's system instructions (admin-only).",
             params=SetInstructionsParams,
             handler=set_instructions,
         ),
