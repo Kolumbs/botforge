@@ -57,7 +57,7 @@ def _build(memory, name, provider, unconfigured, building):
 
     instructions = unconfigured if name == ROOT_AGENT else ""
     if config:
-        instructions = config.instructions or config.description or instructions
+        instructions = config.instructions or instructions
 
     specs = build_dynamic_tool_specs(memory, agent=name)
     if name == ROOT_AGENT:
