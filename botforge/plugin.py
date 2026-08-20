@@ -1,0 +1,102 @@
+"""Zoozl plugin: the generic botforge interface.
+
+Almost nothing is configured in files. A device boots knowing only where to put
+its database; the administrator, the LLM, and every agent and tool are set up
+by talking to it. Until an LLM is configured there is nothing to run an agent
+with, so messages go to ``setup``, a plain state machine, instead.
+
+botforge does not use zoozl's ``root.memory``. That store belongs to zoozl and
+holds its conversation-routing state; a bot's identity, tools and history are
+botforge's own data with a different lifetime and a different backup story, so
+botforge opens its own database from its own config.
+"""
+
+import logging
+import os
+
+import membank
+from agents import Runner
+from zoozl.chatbot import Interface
+
+from . import setup
+from .agent import build_agent
+from .dynamic_tools import is_admin_talker
+from .session import WindowedSession
+
+
+log = logging.getLogger(__name__)
+
+DEFAULT_DATABASE = "botforge.db"
+
+
+class Bot(Interface):
+    """Generic botforge interface: one agent, configuration and tools from database."""
+
+    def load(self, root):
+        """Open botforge's database. Everything else is set up by conversation."""
+        conf = root.conf.get("botforge", {})
+
+        self.history_window = conf.get("history_window", 10)
+        self.aliases = set(conf.get("aliases", ["bot", "help", "greet"]))
+        # Optional. Without it, the first person to reach the device can claim
+        # it - fine on a private channel, less so on a public one.
+        self.admin_password = conf.get("admin_password", "")
+        # Everything the device says for itself comes from a locale file, so a
+        # device can be built for a language botforge does not ship. Individual
+        # lines can still be overridden inline in config.
+        self.locale = setup.load_locale(conf.get("language", setup.DEFAULT_LANGUAGE))
+        self.unconfigured_prompt = conf.get(
+            "unconfigured_prompt", self.locale["unconfigured_prompt"]
+        )
+        self.messages = {**self.locale["messages"], **conf.get("messages", {})}
+
+        # One file holds everything botforge owns: config, tools and history.
+        self.database = os.path.abspath(conf.get("database", DEFAULT_DATABASE))
+        self.memory = membank.LoadMemory(f"sqlite:///{self.database}")
+
+    def setup_step(self, talker, text):
+        """One turn of the pre-LLM setup exchange."""
+        return setup.advance(
+            self.memory,
+            talker,
+            text,
+            self.messages,
+            self.admin_password,
+            self.locale,
+        )
+
+    async def consume(self, package):
+        """Run setup until the device is configured, then hand over to the agent."""
+        package.conversation.subject = "bot"
+        text = package.last_message_text
+        talker = package.talker
+
+        if (text or "").strip().lower() == setup.RESET_COMMAND and is_admin_talker(
+            self.memory, talker
+        ):
+            setup.reset(self.memory)
+            package.callback(self.setup_step(talker, ""))
+            return
+
+        if not setup.is_configured(self.memory):
+            package.callback(self.setup_step(talker, text))
+            return
+
+        if not text:
+            # A connect with nothing said. A configured bot speaks in its own
+            # voice, and there is nothing to answer yet, so say nothing.
+            return
+
+        # Rebuilt each turn so tool and instruction edits take effect without
+        # restarting the process.
+        self.agent = build_agent(self.memory, unconfigured_prompt=self.unconfigured_prompt)
+
+        result = await Runner.run(
+            self.agent,
+            text,
+            session=WindowedSession(
+                package.talker, self.database, self.history_window
+            ),
+            context=package,  # tools read package.talker via the run context
+        )
+        package.callback(result.final_output)
