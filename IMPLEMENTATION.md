@@ -9,17 +9,19 @@ botforge is a minimal chatbot platform where bot personality and capabilities ar
 ### Core Components
 
 1. **botforge/dynamic_tools.py** — Dataclasses for persistence + bootstrap tools
-   - `Provider`: The LLM behind every agent — name, api_key, default model. Written by first-boot setup, changed later with `set_provider`
-   - `BotConfig`: One row per agent — instructions and `exposed_to` (which agent may delegate to it). The agent named `main` is the one people talk to.
+   - `Provider`: One row per LLM provider — name, api_key, model, and whether it is the default. First-boot setup writes the first one; `set_provider` adds more
+   - `BotConfig`: One row per agent — instructions, `exposed_to` (which agent may delegate to it), and optionally its own `provider/model`. The agent named `main` is the one people talk to.
    - `AdminGrant`: Tracks which session talkers have admin privileges
    - `DynamicTool`: Stores tool definitions (name, description, Python source code, and the `agent` that owns it)
    - Bootstrap tools that can't themselves be dynamic (they're needed to write to the DB):
-     - `claim_admin()`: First caller becomes admin
+     - `claim_admin()`: Claims admin if nobody holds it — setup normally grants it already
      - `grant_admin(talker)`: Admin grants privileges to another session
      - `set_instructions(text)`: Admin sets bot's personality
      - `define_tool(name, description, source_code, agent?)`: Admin creates new tools
      - `define_agent(name, description, instructions, exposed_to?)`: Admin creates a specialist the caller can delegate to
-     - `set_provider(api_key?, provider?, model?)`: Admin changes the LLM; with no arguments it reports the current one
+     - `set_provider(provider?, api_key?, model?, default?)`: Admin adds a provider with its key, changes a key or model, or picks the default; with no arguments it lists the stored providers
+     - `set_model(model, agent?)`: Admin runs one agent on its own `provider/model`
+     - `delete_provider(name)`: Admin forgets a provider and its key, unless it is the default or still in use
      - `list_tools()`, `list_agents()`: Inspection
      - `disable_tool(name)` / `enable_tool(name)`: Turn a tool off and on, keeping its source
      - `delete_tool(name)`: Remove a tool and its source for good
@@ -30,17 +32,18 @@ botforge is a minimal chatbot platform where bot personality and capabilities ar
 3. **botforge/openai_tools.py** — The only adapter that binds ToolSpecs to the OpenAI Agents SDK
    - `to_function_tools(specs, context)`: Converts ToolSpecs to `agents.FunctionTool` objects
    - Per-call context injection so tools can access `talker` (session identity) without the LLM passing it
+   - A tool that raises, or gets arguments that do not validate, returns `Tool '<name>' failed: ...` to the model and logs the traceback, so one broken tool cannot end the turn
    - Swapping agent frameworks means writing a sibling of this file; nothing else changes
 
 4. **botforge/agent.py** — Agent assembly
-   - `build_agent(memory, name?, unconfigured_prompt?)`: Loads the stored `Provider`, plus BotConfig and DynamicTool rows, falls back to the generic unconfigured prompt if none exist, assembles an Agent with bootstrap + dynamic tools
-   - `resolve_model(provider)`: binds the configured provider/model pair to the LiteLLM adapter, with the stored key passed explicitly — no global SDK state
+   - `build_agent(memory, name?, unconfigured_prompt?)`: Loads the default `Provider`, plus BotConfig and DynamicTool rows, falls back to the generic unconfigured prompt if none exist, assembles an Agent with bootstrap + dynamic tools
+   - `resolve_model(provider, model?)`: binds a provider/model pair to the LiteLLM adapter, with that provider's stored key passed explicitly — no global SDK state. An agent with its own `provider/model` gets that provider's key; the rest run on the default provider
    - The text a bot uses before it has a personality is not in code — it comes from the locale file, or from `unconfigured_prompt` in config to override it.
 
 5. **botforge/plugin.py** — zoozl Interface
    - `Bot` class: The zoozl-compatible chatbot plugin
    - `load(root)`: Reads config, opens botforge's own membank database, builds initial agent
-   - `consume(package)`: Per message, rebuilds agent (to pick up instruction/tool changes), runs `Runner.run(...)`, sends reply
+   - `consume(package)`: Per message, rebuilds agent (to pick up instruction/tool changes), runs `Runner.run(...)`, sends reply. If that fails, it logs the traceback and replies with a locale line chosen by `FAILURES`: `llm_rejected`, `llm_unreachable`, `llm_busy`, or `llm_failed`
    - Aliases read from config (`conf["botforge"]["aliases"]`), not hardcoded
 
 6. **botforge/setup.py** — First-boot setup, with no LLM
@@ -62,7 +65,7 @@ botforge opens its own `membank.LoadMemory` over the file named by `database` in
 membank is a SQLite dataclass ORM, so each `@dataclass` becomes a table. Conversation history is log-shaped rather than dataclass-shaped, so `session.py` manages its own table in the same file:
 
 ```sql
-CREATE TABLE provider    (id INTEGER PRIMARY KEY, name TEXT, api_key TEXT, model TEXT, updated_at TEXT);
+CREATE TABLE provider    (name TEXT PRIMARY KEY, api_key TEXT, model TEXT, "default" BOOLEAN, updated_at TEXT);
 CREATE TABLE botconfig   (name TEXT PRIMARY KEY, instructions TEXT, model TEXT, description TEXT, exposed_to TEXT, updated_at TEXT);
 CREATE TABLE admingrant  (talker TEXT PRIMARY KEY, granted_at TEXT);
 CREATE TABLE dynamictool (name TEXT PRIMARY KEY, agent TEXT, description TEXT, source_code TEXT, enabled BOOLEAN, created_by TEXT, updated_at TEXT, contract_version INTEGER);
@@ -73,15 +76,15 @@ CREATE TABLE conversation_items (id INTEGER PRIMARY KEY AUTOINCREMENT, session_i
 
 Bootstrap tools are the only hardcoded Python functions in the system. They're always registered, and they're the mechanism that allows everything else to happen (a DB-defined tool can't be the thing that first writes to the DB):
 
-1. **First user calls `claim_admin()`** — they're granted if the `admingrant` table is empty, otherwise they're told someone already claimed it.
-2. **Admin calls `set_instructions(text)`** — updates the singleton `BotConfig` row. On the next message, the agent will use the new instructions.
+1. **First-boot setup grants admin** to whoever completes it (or to whoever gives `admin_password`, when set).
+2. **Admin calls `set_instructions(text)`** — updates the `BotConfig` row of `main`, or of the agent named. On the next message, the agent will use the new instructions.
 3. **Admin calls `define_tool(name, description, source_code)`** — `exec`s the source to validate it defines `Params` (a pydantic model) and `handler` (an async function). If valid, stores it in the `DynamicTool` table. On the next message, the new tool appears in the agent's tool list.
 4. **Subsequent messages** — the agent rebuilds from BotConfig + all enabled DynamicTools, no restart needed.
 
 ### Language
 
 Nothing the device says for itself is in the Python source. `botforge/locales/en.toml`
-holds the first-boot exchange and the unconfigured prompt;
+holds the first-boot exchange, the unconfigured prompt, and the replies sent when a turn fails;
 `language` in config picks a bundled locale by name or a TOML file by path, so a
 device can ship speaking anything. `[botforge.messages]` still overrides
 individual lines on top of whichever locale is loaded.
@@ -101,9 +104,11 @@ bot: Setup complete. Running openai on gpt-4o-mini.
 ```
 
 The model is the provider's default from `PROVIDERS`, so setup never asks for
-one; `set_provider` changes it afterwards through the agent. An administrator
-sending `/setup` clears the provider and runs the flow again, keeping
-administrators.
+one; `set_provider` changes it afterwards through the agent. The provider chosen
+in setup becomes the default, and setup always asks for its key, even if one is
+stored. An administrator sending `/setup` unsets the default and runs the flow
+again, keeping administrators and the keys of other providers, so agents running
+on them keep working.
 
 LiteLLM is the adapter for every provider. It is botforge's own choice, not a
 setting — if it cannot reach something, that is an error or an adapter change,
@@ -123,8 +128,21 @@ PROVIDERS = {
 ```
 
 `save_provider` is the single write path and validates against it, so a stored
-provider is always one the adapter can be given. Changing the provider moves the
-model to that provider's default unless a model is named in the same call.
+provider is always one the adapter can be given. Each provider keeps its own key
+and model, starting on its entry in `PROVIDERS`.
+
+### Providers and models
+
+Every provider that has been given a key is stored, and one of them is the
+default. An agent with no model of its own runs on the default provider and its
+model. `set_model` gives an agent its own `provider/model` instead — one agent
+can run `anthropic/claude-opus-5-5` while another runs `openai/gpt-4o`.
+
+A model is always stored with its provider: a bare `gpt-4o` is saved as
+`<default>/gpt-4o`, so changing the default later does not change what the
+agent runs. `set_model` refuses a provider with no key, and `delete_provider`
+refuses one that is the default or still in use, so an agent cannot point at a
+missing key through chat.
 
 ### Onboarding
 
@@ -154,7 +172,7 @@ building, so a loop logs a warning instead of recursing forever.
 
 ### Admin Authorization
 
-- **No shared secret** — whoever calls `claim_admin` first is permanently admin.
+- **Setup decides** — whoever completes first-boot setup is permanently admin. With `admin_password` set in config, setup asks for it first; without it, the first person to reach the device becomes admin, so set it on any public channel.
 - **Session-based** — admin status is keyed by zoozl's `talker` (a long-lived browser cookie), so the same browser is admin forever (or until the database is deleted).
 - **No sandboxing** — admin code runs with full process privileges (intentional — you own the bot).
 
@@ -191,7 +209,7 @@ also serves as the reference for what can be set.
 Then run:
 
 ```bash
-python -m zoozl my_bot.toml
+python -m zoozl --conf my_bot.toml
 ```
 
 zoozl imports each module named in `extensions`, discovers the `Interface`
@@ -204,7 +222,7 @@ separate store for its conversation routing and is unrelated to botforge's
 
 1. **First bot instance**: Create a new botforge deployment with a fresh database.
 2. **Connect** to the bot (Slack, WebSocket, etc.).
-3. **`claim_admin`**: Take ownership.
+3. **First-boot setup**: Choose a provider and give its key; this also makes you admin.
 4. **`set_instructions`**: Tell the bot who/what it is.
 5. **`define_tool` repeatedly**: Teach it capabilities.
 
