@@ -110,7 +110,7 @@ def is_configured(memory):
 
 
 def reset(memory):
-    """Forget the provider so setup runs again. Administrators are kept."""
+    """Unset the default provider so setup runs again. Administrators are kept."""
     clear_provider(memory)
 
 
@@ -158,7 +158,8 @@ def _take_provider(memory, text, messages):
     if name not in PROVIDERS:
         return say(messages, "bad_provider", value=text)
 
-    save_provider(memory, name=name)
+    # Always ask for the key, even if this provider has one stored already.
+    save_provider(memory, name=name, api_key="", default=True)
     return say(messages, "provider_registered")
 
 

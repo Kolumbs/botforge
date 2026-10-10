@@ -87,6 +87,19 @@ def _build(memory, name, provider, unconfigured, building):
     return Agent(
         name=name,
         instructions=instructions,
-        model=resolve_model(provider, config.model if config else ""),
+        model=_model_for(memory, config, provider),
         tools=tools,
     )
+
+
+def _model_for(memory, config, default):
+    """The agent's own provider/model if it has one, else the default provider."""
+    if not (config and config.model):
+        return resolve_model(default)
+    name, _, model = config.model.partition("/")
+    provider = get_provider(memory, name)
+    if not (provider and provider.api_key):
+        raise RuntimeError(
+            f"Agent {config.name!r} runs on {config.model}, but no key is stored for {name!r}"
+        )
+    return resolve_model(provider, model)

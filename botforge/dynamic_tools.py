@@ -59,7 +59,7 @@ class BotConfig:
 
     name: str = dataclasses.field(default=ROOT_AGENT, metadata={"key": True})
     instructions: str = ""
-    model: str = ""  # optional per-agent model override within the shared provider
+    model: str = ""  # provider/model of its own; empty follows the default provider
     description: str = ""  # shown to the agent that calls this one as a tool
     exposed_to: str = ""   # agent that may delegate here; empty means nobody
     updated_at: str = ""
@@ -67,12 +67,15 @@ class BotConfig:
 
 @dataclasses.dataclass
 class Provider:
-    """The LLM behind every agent. Filled in by first-boot setup, not by config."""
+    """An LLM provider and its key. Filled in by first-boot setup, not by config.
 
-    id: int = dataclasses.field(default=1, metadata={"key": True})
-    name: str = ""  # one of PROVIDERS; empty until setup has run
+    The default provider runs every agent that has no model of its own.
+    """
+
+    name: str = dataclasses.field(default=None, metadata={"key": True})  # one of PROVIDERS
     api_key: str = ""
-    model: str = ""
+    model: str = ""  # what agents on this provider run unless they name a model
+    default: bool = False
     updated_at: str = ""
 
 
@@ -123,18 +126,44 @@ class SetInstructionsParams(AdminAuthBase):
 class SetProviderParams(AdminAuthBase):
     """Parameters for set_provider."""
 
-    api_key: str = pydantic.Field(default="", description="API key. Empty keeps the current one.")
     provider: str = pydantic.Field(
         default="",
-        description=(
-            "Provider name. Empty keeps the current one. Changing it moves to "
-            "that provider's default model unless a model is given too."
-        ),
+        description="Provider name. Empty means the default provider.",
+    )
+    api_key: str = pydantic.Field(
+        default="",
+        description="API key for that provider. Required the first time a provider is added.",
     )
     model: str = pydantic.Field(
         default="",
-        description="Model within that provider, e.g. gpt-4o-mini. Empty keeps the current one.",
+        description="Model agents on that provider run, e.g. gpt-4o-mini. Empty keeps the current one.",
     )
+    default: bool = pydantic.Field(
+        default=False,
+        description="Make this the provider every agent without a model of its own runs on.",
+    )
+
+
+class SetModelParams(AdminAuthBase):
+    """Parameters for set_model."""
+
+    model: str = pydantic.Field(
+        default="",
+        description=(
+            "provider/model, e.g. anthropic/claude-opus-5-5. A bare model name means "
+            "the default provider. Empty puts the agent back on the default provider."
+        ),
+    )
+    agent: str = pydantic.Field(
+        default=ROOT_AGENT,
+        description=f"Which agent runs on it. Defaults to '{ROOT_AGENT}', the one people talk to.",
+    )
+
+
+class ProviderNameParams(AdminAuthBase):
+    """Parameters for delete_provider."""
+
+    name: str = pydantic.Field(description="The provider whose key to forget.")
 
 
 class DefineAgentParams(AdminAuthBase):
@@ -305,29 +334,39 @@ async def set_instructions(ctx: dict, params: SetInstructionsParams) -> str:
         return f"Failed to set instructions: {e}"
 
 
-def get_provider(memory):
-    """Return the stored Provider row, or None before setup has run."""
-    return memory.get.provider(id=1)
+def get_provider(memory, name=None):
+    """Return the named Provider row, or the default one; None if there is none."""
+    if name:
+        return memory.get.provider(name=name)
+    for provider in memory.get("provider"):
+        if provider.default:
+            return provider
+    return None
 
 
-def save_provider(memory, name=None, api_key=None, model=None):
-    """Create or update the Provider row, leaving unspecified fields alone.
+def save_provider(memory, name=None, api_key=None, model=None, default=False):
+    """Create or update a Provider row, leaving unspecified fields alone.
 
-    The single write path for the provider, so validating the name here is
-    enough for everything downstream to trust it. Changing the provider without
-    naming a model moves to that provider's default, since a model belongs to
-    the provider it was chosen for.
+    The single write path for providers, so validating the name here is enough
+    for everything downstream to trust it. No name means the default provider.
+    A new provider starts on its model from ``PROVIDERS``. The first provider
+    saved becomes the default, and making one the default unsets the others.
 
     :raises ValueError: if ``name`` is not a provider the adapter can reach.
     """
     if name and name not in PROVIDERS:
         raise ValueError(name)
 
-    provider = memory.get.provider(id=1) or Provider()
-    if name and name != provider.name:
-        provider.name = name
-        provider.model = PROVIDERS[name]
-    if api_key:
+    provider = get_provider(memory, name)
+    if not provider:
+        provider = Provider(name=name, model=PROVIDERS[name])
+    if default or not get_provider(memory):
+        for other in memory.get("provider"):
+            if other.default and other.name != provider.name:
+                other.default = False
+                memory.put(other)
+        provider.default = True
+    if api_key is not None:
         provider.api_key = api_key
     if model:
         provider.model = model
@@ -352,38 +391,113 @@ def seed_agent(memory, name, description, instructions, exposed_to):
 
 
 def clear_provider(memory):
-    """Forget the configured LLM so first-boot setup runs again."""
-    provider = memory.get.provider(id=1)
+    """Unset the default provider so first-boot setup runs again.
+
+    Keys stay stored, so agents running on another provider keep working.
+    """
+    provider = get_provider(memory)
     if provider:
-        memory.delete(provider)
+        provider.default = False
+        memory.put(provider)
 
 
 async def set_provider(ctx: dict, params: SetProviderParams) -> str:
-    """Change the LLM provider, key or default model (admin-only)."""
+    """Add a provider, or change its key or model, or the default (admin-only)."""
     memory = ctx.get("memory")
     talker = ctx.get("talker")
 
     if not is_admin_talker(memory, talker):
-        return "You must be admin to change the provider. Call claim_admin first."
-    if not (params.api_key or params.provider or params.model):
-        provider = get_provider(memory)
-        if not provider:
+        return "You must be admin to change providers. Call claim_admin first."
+    if not (params.api_key or params.provider or params.model or params.default):
+        providers = list(memory.get("provider"))
+        if not providers:
             return "No provider configured yet."
-        return f"Provider {provider.name}, model {provider.model}, key ending {provider.api_key[-4:]}."
-
-    try:
-        provider = save_provider(
-            memory, params.provider, params.api_key, params.model
+        return "Providers:\n" + "\n".join(
+            f"  - {p.name}{' (default)' if p.default else ''}: model {p.model}, "
+            f"key ending {p.api_key[-4:]}"
+            for p in providers
         )
-    except ValueError as unknown:
+
+    if params.provider and params.provider not in PROVIDERS:
         return (
-            f"'{unknown}' is not a provider I can reach. "
+            f"'{params.provider}' is not a provider I can reach. "
             f"Choose one of: {', '.join(PROVIDERS)}."
         )
+    if params.provider and not get_provider(memory, params.provider) and not params.api_key:
+        return f"'{params.provider}' has no key stored yet. Give its api key too."
+
+    provider = save_provider(
+        memory, params.provider, params.api_key or None, params.model, params.default
+    )
+    role = "the default" if provider.default else "available for set_model"
     return (
-        f"Provider set to {provider.name}, model {provider.model}. "
+        f"{provider.name} runs {provider.model} and is {role}. "
         "It takes effect on the next message."
     )
+
+
+async def set_model(ctx: dict, params: SetModelParams) -> str:
+    """Run one agent on its own provider and model (admin-only)."""
+    memory = ctx.get("memory")
+    talker = ctx.get("talker")
+
+    if not is_admin_talker(memory, talker):
+        return "You must be admin to change the model. Call claim_admin first."
+
+    config = memory.get.botconfig(name=params.agent)
+    if not config and params.agent != ROOT_AGENT:
+        return f"No agent named '{params.agent}'."
+    config = config or BotConfig(name=params.agent)
+
+    model = params.model
+    if model:
+        name, slash, bare = model.partition("/")
+        if not slash:
+            name, bare = get_provider(memory).name, model
+        provider = get_provider(memory, name)
+        if not (provider and provider.api_key):
+            return (
+                f"No key is stored for '{name}'. Add one with set_provider first. "
+                f"Providers I can reach: {', '.join(PROVIDERS)}."
+            )
+        model = f"{name}/{bare}"
+
+    config.model = model
+    config.updated_at = datetime.now(timezone.utc).isoformat()
+    memory.put(config)
+    if model:
+        return f"'{params.agent}' now runs on {model}. It takes effect on the next message."
+    return f"'{params.agent}' follows the default provider again."
+
+
+async def delete_provider(ctx: dict, params: ProviderNameParams) -> str:
+    """Forget a provider and its key (admin-only)."""
+    memory = ctx.get("memory")
+    talker = ctx.get("talker")
+
+    if not is_admin_talker(memory, talker):
+        return "You must be admin to delete providers. Call claim_admin first."
+
+    provider = get_provider(memory, params.name)
+    if not provider:
+        return f"No provider named '{params.name}'."
+    if provider.default:
+        return (
+            f"'{params.name}' is the default provider. Make another one the default "
+            "with set_provider first."
+        )
+    users = [
+        config.name
+        for config in memory.get("botconfig")
+        if config.model.startswith(f"{params.name}/")
+    ]
+    if users:
+        return (
+            f"'{params.name}' is still used by: {', '.join(sorted(users))}. "
+            "Move them with set_model first."
+        )
+    memory.delete(provider)
+    return f"Provider '{params.name}' and its key are forgotten."
 
 
 async def define_agent(ctx: dict, params: DefineAgentParams) -> str:
@@ -438,7 +552,8 @@ async def list_agents(ctx: dict, params: AdminAuthBase) -> str:
             where = f"unreachable - '{config.exposed_to}' does not exist"
         else:
             where = "unreachable - no agent delegates to it"
-        lines.append(f"  - {config.name} ({where}): {owned}")
+        model = f", model {config.model}" if config.model else ""
+        lines.append(f"  - {config.name} ({where}{model}): {owned}")
 
     return "Agents:\n" + "\n".join(lines)
 
@@ -622,11 +737,31 @@ def build_bootstrap_tool_specs() -> list[ToolSpec]:
         ToolSpec(
             name="set_provider",
             description=(
-                "Change the LLM provider, API key or default model (admin-only). "
-                "Called with no arguments it reports the current setting."
+                "Add an LLM provider with its API key, change a provider's key or model, "
+                "or choose the default provider (admin-only). Called with no arguments "
+                "it lists the stored providers."
             ),
             params=SetProviderParams,
             handler=set_provider,
+        ),
+        ToolSpec(
+            name="set_model",
+            description=(
+                "Run one agent on its own provider and model, given as provider/model "
+                "(admin-only). The provider needs a key stored with set_provider. An "
+                "empty model puts the agent back on the default provider."
+            ),
+            params=SetModelParams,
+            handler=set_model,
+        ),
+        ToolSpec(
+            name="delete_provider",
+            description=(
+                "Forget a provider and its API key (admin-only). Not possible for the "
+                "default provider or one an agent still runs on."
+            ),
+            params=ProviderNameParams,
+            handler=delete_provider,
         ),
         ToolSpec(
             name="define_agent",
