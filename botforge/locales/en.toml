@@ -78,3 +78,15 @@ setup_complete = "Setup complete. Running {provider} on {model}. You can give me
 # Setup was somehow reached after it finished.
 already_configured = "Setup is already complete."
 
+# Answering a message failed. Which one is said depends on why.
+# The provider refused the key: only the administrator can fix this.
+llm_rejected = "The AI provider rejected this bot's key. The administrator needs to update it."
+
+# No connection to the provider.
+llm_unreachable = "I can't reach the AI provider right now. Please try again shortly."
+
+# The provider is overloaded or rate-limiting us.
+llm_busy = "The AI provider is busy right now. Please try again shortly."
+
+# Anything else.
+llm_failed = "Something went wrong while answering that. Please try again."

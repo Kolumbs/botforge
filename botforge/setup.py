@@ -52,6 +52,10 @@ REQUIRED_MESSAGES = frozenset(
         "setup_in_progress",
         "setup_complete",
         "already_configured",
+        "llm_rejected",
+        "llm_unreachable",
+        "llm_busy",
+        "llm_failed",
     }
 )
 

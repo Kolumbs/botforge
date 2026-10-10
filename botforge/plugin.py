@@ -14,6 +14,7 @@ botforge opens its own database from its own config.
 import logging
 import os
 
+import litellm
 import membank
 from agents import Runner
 from zoozl.chatbot import Interface
@@ -27,6 +28,25 @@ from .session import WindowedSession
 log = logging.getLogger(__name__)
 
 DEFAULT_DATABASE = "botforge.db"
+
+# Which locale line answers a turn that failed, by what went wrong. Anything not
+# listed gets llm_failed.
+FAILURES = (
+    ((litellm.AuthenticationError, litellm.PermissionDeniedError), "llm_rejected"),
+    ((litellm.APIConnectionError, litellm.Timeout), "llm_unreachable"),
+    (
+        (litellm.RateLimitError, litellm.ServiceUnavailableError, litellm.InternalServerError),
+        "llm_busy",
+    ),
+)
+
+
+def failure_message(error):
+    """The locale key that explains ``error`` to the person who sent the message."""
+    for kinds, key in FAILURES:
+        if isinstance(error, kinds):
+            return key
+    return "llm_failed"
 
 
 class Bot(Interface):
@@ -87,16 +107,22 @@ class Bot(Interface):
             # voice, and there is nothing to answer yet, so say nothing.
             return
 
-        # Rebuilt each turn so tool and instruction edits take effect without
-        # restarting the process.
-        self.agent = build_agent(self.memory, unconfigured_prompt=self.unconfigured_prompt)
-
-        result = await Runner.run(
-            self.agent,
-            text,
-            session=WindowedSession(
-                package.talker, self.database, self.history_window
-            ),
-            context=package,  # tools read package.talker via the run context
-        )
+        try:
+            # Rebuilt each turn so tool and instruction edits take effect without
+            # restarting the process.
+            self.agent = build_agent(
+                self.memory, unconfigured_prompt=self.unconfigured_prompt
+            )
+            result = await Runner.run(
+                self.agent,
+                text,
+                session=WindowedSession(
+                    package.talker, self.database, self.history_window
+                ),
+                context=package,  # tools read package.talker via the run context
+            )
+        except Exception as error:
+            log.exception("Could not answer %s", talker)
+            package.callback(setup.say(self.messages, failure_message(error)))
+            return
         package.callback(result.final_output)
