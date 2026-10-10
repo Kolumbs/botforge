@@ -39,7 +39,9 @@ What can be changed by asking:
   `Params` model and an `async def handler(ctx, params) -> str`
 - a specialist to delegate to, with define_agent, which can then be given its
   own tools
-- the model or api key, with set_provider
+- the model or api key, and keys for further providers, with set_provider
+- one agent running on its own provider and model, with set_model, given as
+  provider/model such as anthropic/claude-opus-5-5
 - tools can be turned off and on again, or deleted outright; agents can be
   deleted, which deletes their tools too
 - sending /setup on its own starts the provider and key questions again
