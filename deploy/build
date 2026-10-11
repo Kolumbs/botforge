@@ -17,10 +17,11 @@ set +a
 
 # A 32-bit userland on a 64-bit kernel (the Raspberry Pi OS default on Pi 4
 # and 5) reports the kernel's machine, aarch64, so uv would choose 64-bit
-# packages. Rerun under the 32-bit personality, where it sees armv7l, with a
-# cache of its own: uv caches what it learns about an interpreter.
-if [[ $TARGET == armv7-* && $(uname -m) != armv7* ]]; then
-    export UV_CACHE_DIR="${XDG_CACHE_HOME:-$HOME/.cache}/uv-armv7"
+# packages. Rerun once under the 32-bit personality (armv8l there, which takes
+# armv7l packages), with a cache of its own: uv caches what it learns about an
+# interpreter.
+if [[ $TARGET == armv7-* && $(uname -m) == aarch64 && -z ${DEPLOY_LINUX32:-} ]]; then
+    export DEPLOY_LINUX32=1 UV_CACHE_DIR="${XDG_CACHE_HOME:-$HOME/.cache}/uv-armv7"
     exec setarch linux32 "$0" "$@"
 fi
 
