@@ -5,11 +5,6 @@
 set -euo pipefail
 
 release=$(dirname "$(readlink -f "$0")")
-slot=${release%/releases/*}
-
-# Written by the deploy pipeline from the repository's secrets.
-. "$slot/secrets.env"
-export BOTFORGE_ADMIN_PASSWORD
 
 umask 077
 config="$RUNTIME_DIRECTORY/bot.toml"

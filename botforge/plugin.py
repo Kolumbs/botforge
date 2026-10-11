@@ -59,11 +59,8 @@ class Bot(Interface):
         self.history_window = conf.get("history_window", 10)
         self.aliases = set(conf.get("aliases", ["bot", "help", "greet"]))
         # Optional. Without it, the first person to reach the device can claim
-        # it - fine on a private channel, less so on a public one. Read from the
-        # environment too, so a deployment need not write it into a file.
-        self.admin_password = conf.get("admin_password") or os.environ.get(
-            "BOTFORGE_ADMIN_PASSWORD", ""
-        )
+        # it - fine on a private channel, less so on a public one.
+        self.admin_password = conf.get("admin_password", "")
         # Everything the device says for itself comes from a locale file, so a
         # device can be built for a language botforge does not ship. Individual
         # lines can still be overridden inline in config.
