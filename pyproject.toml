@@ -23,6 +23,9 @@ dependencies = [
     "pydantic==2.13.4",
 ]
 
+[tool.setuptools.packages.find]
+include = ["botforge*"]
+
 [tool.setuptools.package-data]
 botforge = ["locales/*.toml"]
 
