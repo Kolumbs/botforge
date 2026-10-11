@@ -11,7 +11,8 @@ config="$RUNTIME_DIRECTORY/bot.toml"
 cat > "$config" <<TOML
 extensions = ["botforge.plugin"]
 websocket_port = $PORT
-memory_path = "sqlite:///$STATE_DIRECTORY/zoozl.db"
+# zoozl's routing memory and botforge's own data share one file.
+memory_path = "sqlite:///$STATE_DIRECTORY/botforge.db"
 
 [botforge]
 database = "$STATE_DIRECTORY/botforge.db"
