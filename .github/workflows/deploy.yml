@@ -1,0 +1,65 @@
+# Deploy botforge to its service slot on pi-server-1 (see infra-orchestrator).
+#
+# Only plain `run:` steps: the runner is a 32-bit ARM host, which cannot run
+# JavaScript actions that need Node 24. Deploys come only from main, never from
+# pull requests - this runs on the device itself.
+name: deploy
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+concurrency:
+  group: deploy
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+
+jobs:
+  deploy:
+    runs-on: [self-hosted, pi-server-1]
+    environment: production
+    env:
+      SLOT: /opt/botforge
+      RELEASE: /opt/botforge/releases/${{ github.sha }}-${{ github.run_id }}
+    steps:
+      - name: Check out
+        run: |
+          rm -rf src
+          git init --quiet src
+          git -C src fetch --quiet --depth 1 "https://github.com/${GITHUB_REPOSITORY}.git" "$GITHUB_SHA"
+          git -C src checkout --quiet FETCH_HEAD
+
+      - name: Build release
+        run: src/deploy/build "$RELEASE"
+
+      - name: Write secrets
+        env:
+          ADMIN_PASSWORD: ${{ secrets.BOTFORGE_ADMIN_PASSWORD }}
+        run: |
+          test -n "$ADMIN_PASSWORD" || { echo "BOTFORGE_ADMIN_PASSWORD is not set in the production environment"; exit 1; }
+          umask 027
+          printf 'BOTFORGE_ADMIN_PASSWORD=%q\n' "$ADMIN_PASSWORD" > "$SLOT/secrets.env.new"
+          mv -f "$SLOT/secrets.env.new" "$SLOT/secrets.env"
+
+      - name: Switch and restart
+        run: |
+          ln -sfn "$RELEASE" "$SLOT/current.new"
+          mv -T "$SLOT/current.new" "$SLOT/current"
+          sudo -n /usr/bin/systemctl restart botforge
+
+      - name: Check it stays up
+        run: |
+          sleep 15
+          systemctl is-active --quiet botforge || { systemctl status botforge --no-pager; exit 1; }
+          restarts=$(systemctl show --property NRestarts --value botforge)
+          test "$restarts" = 0 || { echo "botforge restarted $restarts times"; systemctl status botforge --no-pager; exit 1; }
+
+      - name: Keep the last three releases
+        run: |
+          current=$(readlink -f "$SLOT/current")
+          ls -1dt "$SLOT"/releases/* | tail -n +4 | while read -r old; do
+            [ "$old" = "$current" ] || rm -rf "$old"
+          done

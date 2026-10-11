@@ -1,0 +1,28 @@
+#!/bin/bash
+# Build a botforge release into the directory given, on the device itself.
+#
+# Uses only the toolchain the host declares in /etc/kolumbs/toolchain.env
+# (infra-orchestrator). Package versions come from uv.lock. On 32-bit ARM, PyPI
+# lacks builds for some of them, so piwheels is an extra source of files - for
+# the same versions - and nothing is ever compiled here.
+set -euo pipefail
+
+release=${1:?usage: deploy/build <release-dir>}
+src=$(cd "$(dirname "$0")/.." && pwd)
+manifest=${TOOLCHAIN_MANIFEST:-/etc/kolumbs/toolchain.env}
+
+set -a
+. "$manifest"
+set +a
+
+mkdir -p "$release"
+"$UV" venv --quiet --python "$PYTHON" "$release/.venv"
+"$UV" export --quiet --frozen --no-hashes --no-emit-project \
+    --project "$src" --output-file "$release/requirements.txt"
+"$UV" pip install --quiet --python "$release/.venv/bin/python" \
+    --no-deps --only-binary :all: \
+    --extra-index-url https://www.piwheels.org/simple \
+    --index-strategy unsafe-best-match \
+    --requirement "$release/requirements.txt"
+"$UV" pip install --quiet --python "$release/.venv/bin/python" --no-deps "$src"
+cp "$src/deploy/start" "$release/start"
