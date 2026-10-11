@@ -69,3 +69,69 @@ history replayed to the LLM. Two gaps remain:
 
 **Minor:** when a provider rejects a key, its error text - with a masked key
 such as `sk-inval****` - goes to the service log with the traceback.
+
+## v1 multi-user: every user owns their own private assistant
+
+**Decision:** anyone who connects gets their own bot, configures it with their
+own provider keys, and is its only admin. Bots are private assistants for their
+owner; nothing is shared between users. Publishing a bot to visitors (the
+profile-bot case) comes later. No limits or payment for now - one Pi, few users,
+full control to add them if usage grows.
+
+This replaces the device-wide admin: there is no global setup or global admin
+any more, only owners of their own bots. "Admin on more than one channel" above
+becomes "the same user on more than one channel" (`/link`), and the API-key items
+apply per user.
+
+**Isolation is the core requirement.** Tools are arbitrary Python. Today they
+run inside the botforge process as the `botforge` account, where one user's tool
+could read every other user's database and keys, read other sessions from memory,
+or crash every bot at once. Per-user folders alone do not help, since every
+process of the same account can open the same files.
+
+**Design:**
+
+- **Router** - zoozl plus the botforge plugin, as today. It maps a talker to a
+  user and forwards messages to that user's worker. zoozl's memory goes back to a
+  file of its own, outside every user folder: it holds raw messages from all
+  users, including keys typed in setup.
+- **Worker per user** - a Python process per user, running that user's setup,
+  agents and tools against `/var/lib/botforge/users/<id>/botforge.db`. Router and
+  worker talk over pipes. A worker that crashes or hangs affects only its owner;
+  the router restarts it. Idle workers stop after a while and start again on the
+  next message, to save memory.
+- **One Linux account per user, from a pool.** Each worker runs as its own account
+  (`botforge-u001`, …) and its folder is that account's alone (`0700`), so the
+  operating system - not botforge - keeps users out of each other's files and
+  processes. Accounts cannot be created at runtime without root, so infra creates
+  the pool (see infra-orchestrator TODO), and botforge assigns the next free
+  account to a new user and records `talker → account` in the router's own
+  database. The router starts a worker with
+  `sudo -u botforge-uNNN /opt/botforge/current/worker uNNN` - the only sudo it has.
+  When the pool is used up, new users are told there is no room until it grows.
+
+**Alternatives considered:**
+
+- *Worker per user under the same account* - isolates crashes and memory, not
+  files.
+- *Landlock* (a worker restricts itself to its folder, no root) - the lightest
+  option, but not available on pi-server-1: kernel `6.1.21-v8+` runs only the
+  `capability` security module. Worth revisiting after a kernel update.
+- *bubblewrap* - works, but a sandbox per tool call was judged heavier than
+  needed.
+
+**What changes:**
+
+- botforge: router/worker split; all per-bot data moves into the user's
+  database; first-boot setup becomes per-user setup; the global admin tools go
+  (`claim_admin`, `grant_admin`, the global `/setup`). The stored tool contract
+  stays largely the same, since tools still run in-process - in their owner's
+  worker.
+- infra: the account pool and folders, one sudoers rule, and
+  `NoNewPrivileges=false` for the botforge unit (it currently blocks all sudo).
+- deploy: `deploy/start` runs the router; workers are started by the router from
+  the current release.
+
+**Exposure today:** the endpoint is reachable only by someone who knows to open a
+websocket to `/ws/botforge`; nothing links to it. Until isolation exists, anyone
+who finds it shares one bot, and its admin is whoever completed setup first.
